@@ -67,14 +67,16 @@ function render(){
   document.getElementById("debtSub").textContent=state.debts.length?state.debts.length+" активных":"нет активных долгов";
 
   renderTxList();
+  if(document.getElementById("fullHistoryScrim").classList.contains("show"))openFullHistory(); // держим диалог полной истории актуальным после правок
   renderSpark();
   renderGoals();renderAssets();renderFixed();renderDebts();renderCats();renderCatChanges();renderDynamics();
 }
 
 /* ---------- history: render + edit + search/filter ---------- */
 let editTxId=null,txEditType="exp",histType="all";
-function renderTxList(){
-  const list=document.getElementById("txList");
+/* применяет активные фильтры (поиск/категория/период/сумма/тип) к state.tx; используется и
+   встроенным списком, и диалогом «вся история» — чтобы не дублировать логику фильтрации */
+function filteredTx(){
   const search=(document.getElementById("histSearch")?.value||"").trim().toLowerCase();
   const cat=document.getElementById("histCat")?.value||"";
   const period=document.getElementById("histPeriod")?.value||"all";
@@ -93,6 +95,20 @@ function renderTxList(){
     if(period==="30"&&new Date(t.date)<new Date(Date.now()-30*86400000))return false;
     return true;
   });
+  return{rows,hasFilters};
+}
+function txRowHtml(t,i){
+  return `<div class="list-item" style="animation-delay:${Math.min(i*.03,.5)}s" onclick="openTxEdit('${t.id}')" title="Изменить">
+    <div class="avatar ${t.type}">${catE(t.type,t.cat)}</div>
+    <div class="body"><b>${t.note?esc(t.note):esc(t.cat)}</b><span>${esc(t.cat)} · ${fmtDate(t.date)}</span></div>
+    <div class="trail ${t.type}">${t.type==="inc"?"+":"−"}${fmt(t.amount)}</div>
+    <button class="icon-btn del" onclick="event.stopPropagation();delTx('${t.id}')" title="Удалить" aria-label="Удалить">
+      <svg class="icon sm" viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+  </div>`;
+}
+function renderTxList(){
+  const list=document.getElementById("txList");
+  const{rows,hasFilters}=filteredTx();
   document.getElementById("txCount").textContent=state.tx.length?(hasFilters?rows.length+" из "+state.tx.length:rows.length+" всего"):"";
   if(!rows.length){
     list.innerHTML=state.tx.length
@@ -100,15 +116,22 @@ function renderTxList(){
       :empty("Пока нет операций. Добавьте первый доход или расход.","M12 1v22 M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6");
     return;
   }
-  list.innerHTML=rows.slice(0,60).map((t,i)=>{
-    return `<div class="list-item" style="animation-delay:${Math.min(i*.03,.5)}s" onclick="openTxEdit('${t.id}')" title="Изменить">
-      <div class="avatar ${t.type}">${catE(t.type,t.cat)}</div>
-      <div class="body"><b>${t.note?esc(t.note):esc(t.cat)}</b><span>${esc(t.cat)} · ${fmtDate(t.date)}</span></div>
-      <div class="trail ${t.type}">${t.type==="inc"?"+":"−"}${fmt(t.amount)}</div>
-      <button class="icon-btn del" onclick="event.stopPropagation();delTx('${t.id}')" title="Удалить" aria-label="Удалить">
-        <svg class="icon sm" viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
-    </div>`;
-  }).join("");
+  list.innerHTML=rows.slice(0,60).map(txRowHtml).join("");
+  if(rows.length>60){
+    list.innerHTML+=`<div style="text-align:center;padding:10px"><button class="btn text" onclick="openFullHistory()">Показаны первые 60 из ${rows.length} — открыть всё</button></div>`;
+  }
+}
+/* полный список по тем же фильтрам — открывается в отдельном диалоге, без обрезки списка */
+function openFullHistory(){
+  const{rows,hasFilters}=filteredTx();
+  document.getElementById("fullHistoryDesc").textContent=hasFilters
+    ?`${rows.length} из ${state.tx.length} операций — по текущим фильтрам`
+    :`${rows.length} операций всего`;
+  const box=document.getElementById("fullHistoryList");
+  box.innerHTML=rows.length
+    ?rows.slice(0,2000).map(txRowHtml).join("")
+    :empty("Ничего не найдено","M11 3a8 8 0 1 0 0 16 8 8 0 0 0 0-16z M21 21l-4.3-4.3");
+  openScrim("fullHistoryScrim");
 }
 function toggleHistFilters(){
   const box=document.getElementById("histFilters");
@@ -1089,7 +1112,7 @@ document.getElementById("aAmount").addEventListener("keydown",e=>{if(e.key==="En
 document.getElementById("histSearch").addEventListener("keydown",e=>{if(e.key==="Enter")e.preventDefault();});
 ["liUser","liPass"].forEach(id=>document.getElementById(id).addEventListener("keydown",e=>{if(e.key==="Enter")doLogin();}));
 document.getElementById("logoutBtn").onclick=logout;
-["goalScrim","debtScrim","amtScrim","fixedScrim","fixInfoScrim","txScrim","dueScrim","assetScrim"].forEach(id=>document.getElementById(id).addEventListener("click",e=>{if(e.target.id===id)closeScrim(id);}));
+["goalScrim","debtScrim","amtScrim","fixedScrim","fixInfoScrim","txScrim","dueScrim","assetScrim","fullHistoryScrim"].forEach(id=>document.getElementById(id).addEventListener("click",e=>{if(e.target.id===id)closeScrim(id);}));
 document.addEventListener("keydown",e=>{if(e.key==="Escape")document.querySelectorAll(".scrim.show").forEach(s=>s.classList.remove("show"));});
 window.addEventListener("scroll",()=>document.getElementById("appbar").classList.toggle("scrolled",window.scrollY>4));
 

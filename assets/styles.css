@@ -311,6 +311,9 @@
   /* ===================== HISTORY FILTERS + SUB-HEAD ===================== */
   .hist-filters{margin-bottom:14px;padding-bottom:14px;border-bottom:1px solid var(--md-sys-color-outline-variant)}
   .sub-head{display:flex;align-items:center;justify-content:space-between;font-size:14px;font-weight:600;margin-bottom:8px}
+  /* встроенный список истории — фикс.высота со скроллом, чтобы панель не растягивалась бесконечно */
+  #txList{max-height:440px;overflow-y:auto;margin:0 -4px;padding:0 4px}
+  #txList .empty{max-height:none}
 
   /* ===================== ASSET PRICE ROW ===================== */
   .asset-price-row{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:10px;font-size:12px;color:var(--md-sys-color-on-surface-variant)}
@@ -355,6 +358,10 @@
   .dialog h3{font-size:22px;font-weight:600;margin-bottom:4px}
   .dialog .desc{font-size:14px;color:var(--md-sys-color-on-surface-variant);margin-bottom:8px}
   .dialog .actions{display:flex;gap:8px;justify-content:flex-end;margin-top:22px}
+  .dialog.dialog-lg{max-width:560px;max-height:85vh;display:flex;flex-direction:column}
+  .full-history-list{flex:1;overflow-y:auto;margin-top:8px;min-height:0}
+  /* ниже базового z-index скримов — чтобы диалог редактирования, открытый ИЗ полной истории, был поверх неё */
+  #fullHistoryScrim{z-index:55}
   .emoji-pick{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
   .emoji-pick button{width:46px;height:46px;border-radius:var(--md-sys-shape-corner-m);border:1px solid var(--md-sys-color-outline-variant);background:transparent;font-size:22px;cursor:pointer;transition:.15s}
   .emoji-pick button.sel{border:2px solid var(--md-sys-color-primary);background:var(--md-sys-color-primary-container)}

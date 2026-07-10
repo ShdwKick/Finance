@@ -122,6 +122,9 @@
           <button class="icon-btn" id="histFilterBtn" onclick="toggleHistFilters()" title="Поиск и фильтр" aria-label="Поиск и фильтр" style="margin-left:6px">
             <svg class="icon sm" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
           </button>
+          <button class="icon-btn" onclick="openFullHistory()" title="Открыть всю историю" aria-label="Открыть всю историю">
+            <svg class="icon sm" viewBox="0 0 24 24"><path d="M8 3H5a2 2 0 0 0-2 2v3"/><path d="M21 8V5a2 2 0 0 0-2-2h-3"/><path d="M3 16v3a2 2 0 0 0 2 2h3"/><path d="M16 21h3a2 2 0 0 0 2-2v-3"/></svg>
+          </button>
         </div>
         <div class="hist-filters" id="histFilters" style="display:none">
           <div class="field" style="margin-top:0"><input id="histSearch" type="text" placeholder=" " oninput="renderTxList()"><label for="histSearch">Поиск по названию или категории</label></div>
@@ -410,6 +413,18 @@
       <button class="btn text danger" onclick="delTxFromEdit()" style="margin-right:auto">Удалить</button>
       <button class="btn text" onclick="closeScrim('txScrim')">Отмена</button>
       <button class="btn filled" onclick="saveTxEdit()">Сохранить</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===================== FULL HISTORY DIALOG ===================== -->
+<div class="scrim" id="fullHistoryScrim">
+  <div class="dialog dialog-lg">
+    <h3>Вся история</h3>
+    <div class="desc" id="fullHistoryDesc">По текущим фильтрам</div>
+    <div id="fullHistoryList" class="full-history-list"></div>
+    <div class="actions">
+      <button class="btn text" onclick="closeScrim('fullHistoryScrim')">Закрыть</button>
     </div>
   </div>
 </div>
