@@ -1,0 +1,25 @@
+name: moi-finansy
+
+services:
+  finance:
+    build: .
+    image: moi-finansy:latest
+    container_name: finance
+    restart: unless-stopped
+    environment:
+      HOST: 0.0.0.0
+      PORT: 8787
+      # Раскомментируйте для ПЕРВОГО запуска, чтобы сразу создать пользователя.
+      # На уже существующую базу эти переменные не влияют (сработает только если
+      # в базе ещё вообще нет пользователей).
+      # FIN_USER: myname
+      # FIN_PASS: my-strong-password
+    ports:
+      # По умолчанию слушаем только на localhost — наружу отдаёт nginx (см. README-deploy.md).
+      # Если хотите достучаться до контейнера напрямую без nginx, поменяйте на "8787:8787".
+      - "127.0.0.1:8787:8787"
+    volumes:
+      - finance-data:/app/data
+
+volumes:
+  finance-data:

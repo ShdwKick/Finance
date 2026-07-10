@@ -1,0 +1,25 @@
+[Unit]
+Description=Moi Finansy (finance tracker sync server)
+After=network.target
+
+[Service]
+Type=simple
+# Каталог, куда вы скопировали index.html и server.js:
+WorkingDirectory=/opt/finance
+ExecStart=/usr/bin/node /opt/finance/server.js
+Restart=always
+RestartSec=3
+# Слушаем только localhost — наружу выставляет nginx:
+Environment=HOST=127.0.0.1
+Environment=PORT=8787
+Environment=DATA_DIR=/opt/finance/data
+# Работаем от отдельного непривилегированного пользователя:
+User=finance
+Group=finance
+# Немного изоляции:
+NoNewPrivileges=true
+ProtectSystem=full
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
