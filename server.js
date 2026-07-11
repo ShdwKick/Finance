@@ -9,11 +9,19 @@
  * Список юзеров:     node server.js users
  *
  * Переменные окружения:
- *   PORT       (по умолчанию 8787)   — порт
- *   HOST       (по умолчанию 127.0.0.1) — интерфейс (за nginx оставляем localhost)
- *   DATA_DIR   (по умолчанию ./data) — где хранить store.json
+ *   PORT           (по умолчанию 8787)   — порт
+ *   HOST           (по умолчанию 127.0.0.1) — интерфейс (за nginx оставляем localhost)
+ *   DATA_DIR       (по умолчанию ./data) — где хранить store.json
  *   FIN_USER / FIN_PASS              — при первом запуске создаст этого пользователя,
  *                                      если в базе ещё никого нет.
+ *   ALLOWED_ORIGIN — источник, которому разрешён доступ к /api/* (CORS), напр.
+ *                    https://burning-house.online. Нужно, когда фронтенд отдаётся
+ *                    отдельно (напр. GitHub Pages), а этот сервер — только API на
+ *                    своём домене. Без переменной CORS-заголовки не отправляются
+ *                    (подходит для варианта "фронт и API на одном домене").
+ *   REGISTER_CODE  — если задан, /api/register требует этот код в поле "code"
+ *                    (простая защита от случайной регистрации посторонних на
+ *                    публично торчащем эндпоинте). Не задан — регистрация открыта всем.
  */
 "use strict";
 
@@ -25,6 +33,8 @@ const crypto = require("crypto");
 const PORT = parseInt(process.env.PORT || "8787", 10);
 const HOST = process.env.HOST || "127.0.0.1";
 const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, "data");
+const ALLOWED_ORIGIN = process.env.ALLOWED_ORIGIN || "";
+const REGISTER_CODE = process.env.REGISTER_CODE || "";
 const STORE = path.join(DATA_DIR, "store.json");
 const APP_HTML = path.join(__dirname, "index.html");
 const TOKEN_TTL = 60 * 24 * 60 * 60 * 1000; // 60 дней
@@ -60,6 +70,14 @@ function setUser(username, password) {
   store.users[username] = { salt, hash };
   if (!store.states[username]) store.states[username] = { data: null, updatedAt: 0 };
   saveStore(store);
+}
+// общая проверка логина/пароля — используется и CLI adduser, и /api/register
+function validateCreds(username, password) {
+  username = String(username || "").trim();
+  password = String(password || "");
+  if (!/^[a-zA-Z0-9_.-]{3,32}$/.test(username)) return "Логин: 3-32 символа, латиница/цифры/._-";
+  if (password.length < 6) return "Пароль: минимум 6 символов";
+  return null;
 }
 
 // ---------- токены (в памяти) ----------
@@ -152,6 +170,31 @@ function serveStatic(res, pathname) {
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, "http://x");
   const p = url.pathname;
+
+  // CORS: нужен, когда фронтенд отдаётся с другого домена (напр. GitHub Pages),
+  // а этот сервер — только API. Без ALLOWED_ORIGIN заголовки не шлём (тогда
+  // работает только сценарий "фронт и API на одном домене", как раньше).
+  if (ALLOWED_ORIGIN && p.startsWith("/api/")) {
+    res.setHeader("Access-Control-Allow-Origin", ALLOWED_ORIGIN);
+    res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, OPTIONS");
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+    if (req.method === "OPTIONS") { res.writeHead(204); return res.end(); }
+  }
+
+  // API: регистрация
+  if (p === "/api/register" && req.method === "POST") {
+    try {
+      const body = JSON.parse(await readBody(req) || "{}");
+      if (REGISTER_CODE && body.code !== REGISTER_CODE) return json(res, 401, { error: "bad code" });
+      const err = validateCreds(body.username, body.password);
+      if (err) return json(res, 400, { error: err });
+      const username = String(body.username).trim().toLowerCase();
+      store.users = loadStore().users; // подхватить пользователей, добавленных параллельно через CLI
+      if (store.users[username]) return json(res, 409, { error: "user exists" });
+      setUser(username, body.password);
+      return json(res, 200, { token: issueToken(username) });
+    } catch { return json(res, 400, { error: "bad request" }); }
+  }
 
   // API: логин
   if (p === "/api/login" && req.method === "POST") {

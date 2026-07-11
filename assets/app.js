@@ -67,9 +67,16 @@ function render(){
   document.getElementById("debtSub").textContent=state.debts.length?state.debts.length+" активных":"нет активных долгов";
 
   renderTxList();
-  if(document.getElementById("fullHistoryScrim").classList.contains("show"))openFullHistory(); // держим диалог полной истории актуальным после правок
   renderSpark();
   renderGoals();renderAssets();renderFixed();renderDebts();renderCats();renderCatChanges();renderDynamics();
+  // держим открытые диалоги «показать всё» актуальными после правок, сделанных прямо из них
+  refreshIfOpen("fullHistoryScrim",openFullHistory);
+  refreshIfOpen("fullGoalsScrim",openFullGoals);
+  refreshIfOpen("fullAssetsScrim",openFullAssets);
+  refreshIfOpen("fullFixedScrim",openFullFixed);
+}
+function refreshIfOpen(scrimId,fn){
+  if(document.getElementById(scrimId).classList.contains("show"))fn();
 }
 
 /* ---------- history: render + edit + search/filter ---------- */
@@ -257,25 +264,35 @@ function empty(text,path){
 }
 
 /* ---------- goals ---------- */
+function goalTileHtml(g){
+  const pct=Math.min(100,Math.round(g.saved/g.target*100)),done=g.saved>=g.target,left=Math.max(0,g.target-g.saved);
+  return `<div class="tile ${done?"done":""}">
+    <div class="top"><div class="emoji">${g.emoji}</div>
+      <div><div class="tname">${esc(g.name)}</div>
+      <div class="tsub">${fmt(g.saved)} из ${fmt(g.target)}${done?" · Готово!":" · осталось "+fmt(left)}</div></div>
+      <div class="pct">${pct}%</div></div>
+    <div class="linear"><i data-w="${pct}"></i></div>
+    <div class="acts">
+      <button class="btn tonal" onclick="openAmt('goal','${g.id}')">Пополнить</button>
+      <button class="btn text" onclick="openGoal('${g.id}')">Изменить</button>
+      <button class="btn text danger" onclick="delGoal('${g.id}')" style="flex:0 0 44px;padding:0">
+        <svg class="icon sm" viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg></button>
+    </div></div>`;
+}
 function renderGoals(){
   const box=document.getElementById("goalList");
+  document.getElementById("goalCount").textContent=state.goals.length?state.goals.length+" всего":"";
   if(!state.goals.length){box.innerHTML=empty("Создайте первую цель и копите с удовольствием","M12 2l3 7h7l-5.5 4 2 7-6.5-4.5L5.5 20l2-7L2 9h7z");return;}
-  box.innerHTML=state.goals.map(g=>{
-    const pct=Math.min(100,Math.round(g.saved/g.target*100)),done=g.saved>=g.target,left=Math.max(0,g.target-g.saved);
-    return `<div class="tile ${done?"done":""}">
-      <div class="top"><div class="emoji">${g.emoji}</div>
-        <div><div class="tname">${esc(g.name)}</div>
-        <div class="tsub">${fmt(g.saved)} из ${fmt(g.target)}${done?" · Готово!":" · осталось "+fmt(left)}</div></div>
-        <div class="pct">${pct}%</div></div>
-      <div class="linear"><i data-w="${pct}"></i></div>
-      <div class="acts">
-        <button class="btn tonal" onclick="openAmt('goal','${g.id}')">Пополнить</button>
-        <button class="btn text" onclick="openGoal('${g.id}')">Изменить</button>
-        <button class="btn text danger" onclick="delGoal('${g.id}')" style="flex:0 0 44px;padding:0">
-          <svg class="icon sm" viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg></button>
-      </div></div>`;
-  }).join("");
+  box.innerHTML=state.goals.map(goalTileHtml).join("");
   fillBars(box);
+}
+/* полный список целей — без обрезки, в отдельном диалоге */
+function openFullGoals(){
+  document.getElementById("fullGoalsDesc").textContent=state.goals.length+" целей";
+  const box=document.getElementById("fullGoalsList");
+  box.innerHTML=state.goals.length?state.goals.map(goalTileHtml).join(""):empty("Пока нет целей","M12 2l3 7h7l-5.5 4 2 7-6.5-4.5L5.5 20l2-7L2 9h7z");
+  fillBars(box);
+  openScrim("fullGoalsScrim");
 }
 function openGoal(id){
   editId=id||null;const g=id?state.goals.find(x=>x.id===id):null;
@@ -311,9 +328,7 @@ function setAssetFilter(t,el){
   el.classList.add("sel");
   renderAssets();
 }
-function renderAssets(){
-  const box=document.getElementById("assetList");if(!box)return;
-  if(!state.assets.length){box.innerHTML=empty("Добавьте сбережения, вклады, инвестиции — всё, что не проходит через операции.","M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20z M12 6v6l4 2");return;}
+function filteredAssets(){
   const search=(document.getElementById("assetSearch")?.value||"").trim().toLowerCase();
   const rows=state.assets.filter(a=>{
     if(assetFilterType==="manual"&&a.ticker)return false;
@@ -321,20 +336,42 @@ function renderAssets(){
     if(search&&!(a.name.toLowerCase().includes(search)||(a.ticker||"").toLowerCase().includes(search)))return false;
     return true;
   });
+  return{rows,hasFilters:!!(search||assetFilterType!=="all")};
+}
+function assetRowHtml(a){
+  const sub=a.ticker?`${a.qty} шт. × ${fmt(a.lastPrice||0)}`:"";
+  return `<div class="mini-item" onclick="openAsset('${a.id}')" title="Изменить">
+    <div class="mi-row">
+      <div class="emoji">${a.emoji}</div>
+      <div class="body"><b>${esc(a.name)}</b>${sub?`<span>${esc(sub)}</span>`:""}</div>
+      <div class="amt">${fmt(a.amount)}</div>
+    </div>
+  </div>`;
+}
+function renderAssets(){
+  const sumBox=document.getElementById("assetSumline"),box=document.getElementById("assetItemsScroll");
+  if(!sumBox||!box)return;
+  if(!state.assets.length){
+    sumBox.innerHTML="";
+    box.innerHTML=empty("Добавьте сбережения, вклады, инвестиции — всё, что не проходит через операции.","M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20z M12 6v6l4 2");
+    return;
+  }
+  const{rows}=filteredAssets();
   // итог считаем по ВСЕМ активам (не по отфильтрованным) — чтобы совпадало с net worth
   const total=state.assets.reduce((s,a)=>s+a.amount,0);
-  const sumline=`<div class="sumline"><span>Итого активов</span><span class="sv">${fmt(total)}</span></div>`;
-  if(!rows.length){box.innerHTML=sumline+empty("Ничего не найдено по этим фильтрам","M11 3a8 8 0 1 0 0 16 8 8 0 0 0 0-16z M21 21l-4.3-4.3");return;}
-  box.innerHTML=sumline+rows.map(a=>{
-    const sub=a.ticker?`${a.qty} шт. × ${fmt(a.lastPrice||0)}`:"";
-    return `<div class="mini-item" onclick="openAsset('${a.id}')" title="Изменить">
-      <div class="mi-row">
-        <div class="emoji">${a.emoji}</div>
-        <div class="body"><b>${esc(a.name)}</b>${sub?`<span>${esc(sub)}</span>`:""}</div>
-        <div class="amt">${fmt(a.amount)}</div>
-      </div>
-    </div>`;
-  }).join("");
+  sumBox.innerHTML=`<div class="sumline"><span>Итого активов</span><span class="sv">${fmt(total)}</span></div>`;
+  box.innerHTML=rows.length?rows.map(assetRowHtml).join(""):empty("Ничего не найдено по этим фильтрам","M11 3a8 8 0 1 0 0 16 8 8 0 0 0 0-16z M21 21l-4.3-4.3");
+}
+/* полный список активов по тем же фильтрам — без обрезки, в отдельном диалоге */
+function openFullAssets(){
+  const{rows,hasFilters}=filteredAssets();
+  document.getElementById("fullAssetsDesc").textContent=hasFilters
+    ?`${rows.length} из ${state.assets.length} активов — по текущим фильтрам`
+    :`${rows.length} активов всего`;
+  document.getElementById("fullAssetsList").innerHTML=rows.length
+    ?rows.map(assetRowHtml).join("")
+    :empty("Ничего не найдено","M11 3a8 8 0 1 0 0 16 8 8 0 0 0 0-16z M21 21l-4.3-4.3");
+  openScrim("fullAssetsScrim");
 }
 let assetKind="manual",lastFetchedPrice=null;
 function setAssetKind(k,el){
@@ -556,7 +593,7 @@ function renderDebts(){
     <div class="zones"><div class="marker" id="pdnMarker" style="left:${markerLeft}%"></div></div>
     <div class="scale"><span>0%</span><span>30%</span><span>50%</span><span>80%</span><span>100%</span></div>
     <div class="field filled pdn-income">
-      <input id="mIncome" type="number" placeholder=" " min="0" step="0.01" value="${state.monthlyIncome||""}" oninput="setIncome(this.value)">
+      <input id="mIncome" type="text" inputmode="decimal" placeholder=" " value="${state.monthlyIncome||""}" oninput="sanitizeAmt(this);setIncome(this.value)">
       <label for="mIncome">Мой доход в месяц, ₽</label>
     </div>
     <div class="pdn-hint" id="pdnHint">${state.monthlyIncome?"Учитывается указанный вами доход.":"Авто из доходов за месяц: "+fmt(p.monthInc)+"."}</div>
@@ -745,32 +782,43 @@ function renderCatChanges(){
 }
 
 /* ---------- mandatory (fixed) expenses ---------- */
-function renderFixed(){
+function fixedRowHtml(f){
   const now=new Date();
+  let sub=f.days&&f.days.length?("каждое "+f.days.join("-е, ")+"-е число"):"ежемесячно";
+  let prog="";
+  if(f.category){
+    const spent=monthCatSpent(f.category,now);
+    const pct=f.amount>0?Math.min(100,Math.round(spent/f.amount*100)):0;
+    const over=spent>f.amount;
+    sub=f.category;
+    prog=`<div class="mi-prog">
+      <div class="linear" style="height:5px"><i data-w="${pct}"${over?' style="background:var(--md-sys-color-error)"':''}></i></div>
+      <span class="fpay">${fmt(spent)} из ${fmt(f.amount)} за месяц${spent>=f.amount?" ✓":""}</span></div>`;
+  }
+  return `<div class="mini-item" onclick="openFixInfo('${f.id}')" title="Подробнее">
+    <div class="mi-row">
+      <div class="emoji">${f.emoji}</div>
+      <div class="body"><b>${esc(f.name)}</b><span>${esc(sub)}</span></div>
+      <div class="amt">${fmt(f.amount)}</div>
+    </div>${prog}</div>`;
+}
+function sortedFixed(){return[...state.fixed].sort((a,b)=>b.amount-a.amount);}
+function renderFixed(){
   const total=state.fixed.reduce((s,f)=>s+f.amount,0);
   document.getElementById("fixedTotalLbl").textContent=fmt(total)+" / мес";
+  document.getElementById("fixedCount").textContent=state.fixed.length?state.fixed.length+" всего":"";
   const box=document.getElementById("fixedList");
   if(!state.fixed.length){box.innerHTML=empty("Добавьте обязательные ежемесячные платежи: аренда, ЖКХ, связь, подписки.","M3 9h18 M4 5h16a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1z");return;}
-  box.innerHTML=[...state.fixed].sort((a,b)=>b.amount-a.amount).map(f=>{
-    let sub=f.days&&f.days.length?("каждое "+f.days.join("-е, ")+"-е число"):"ежемесячно";
-    let prog="";
-    if(f.category){
-      const spent=monthCatSpent(f.category,now);
-      const pct=f.amount>0?Math.min(100,Math.round(spent/f.amount*100)):0;
-      const over=spent>f.amount;
-      sub=f.category;
-      prog=`<div class="mi-prog">
-        <div class="linear" style="height:5px"><i data-w="${pct}"${over?' style="background:var(--md-sys-color-error)"':''}></i></div>
-        <span class="fpay">${fmt(spent)} из ${fmt(f.amount)} за месяц${spent>=f.amount?" ✓":""}</span></div>`;
-    }
-    return `<div class="mini-item" onclick="openFixInfo('${f.id}')" title="Подробнее">
-      <div class="mi-row">
-        <div class="emoji">${f.emoji}</div>
-        <div class="body"><b>${esc(f.name)}</b><span>${esc(sub)}</span></div>
-        <div class="amt">${fmt(f.amount)}</div>
-      </div>${prog}</div>`;
-  }).join("");
+  box.innerHTML=sortedFixed().map(fixedRowHtml).join("");
   fillBars(box);
+}
+/* полный список обязательных платежей — без обрезки, в отдельном диалоге */
+function openFullFixed(){
+  document.getElementById("fullFixedDesc").textContent=state.fixed.length+" платежей, "+fmt(state.fixed.reduce((s,f)=>s+f.amount,0))+" в месяц";
+  const box=document.getElementById("fullFixedList");
+  box.innerHTML=state.fixed.length?sortedFixed().map(fixedRowHtml).join(""):empty("Пока нет обязательных платежей","M3 9h18 M4 5h16a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1z");
+  fillBars(box);
+  openScrim("fullFixedScrim");
 }
 /* иконки для обязательного платежа: базовый набор + иконки всех категорий расходов */
 let fixedEmojiAuto=true; // пока true — смена категории сама подставляет её иконку (только для новых платежей)
@@ -886,7 +934,7 @@ function checkDuePayments(){
         <div class="emoji">${f.emoji}</div>
         <div><div class="tname">${esc(f.name)}</div><div class="tsub">${f.category?esc(f.category):"без категории"} · ${item.day}-е число${occLabel}</div></div>
       </div>
-      <div class="field" style="margin-top:8px"><input type="number" step="0.01" placeholder=" " value="${item.amount}" id="due-amt-${rowId}"><label for="due-amt-${rowId}">Сумма, ₽</label></div>
+      <div class="field" style="margin-top:8px"><input type="text" inputmode="decimal" placeholder=" " value="${item.amount}" id="due-amt-${rowId}" oninput="sanitizeAmt(this)"><label for="due-amt-${rowId}">Сумма, ₽</label></div>
       <div class="acts">
         <button class="btn tonal" onclick="confirmDuePayment('${f.id}','${rowId}')">Подтвердить</button>
         <button class="btn text" onclick="skipDuePayment('${f.id}','${item.day}','${rowId}')">Пропустить</button>
@@ -956,7 +1004,7 @@ function renderDynamics(){
     <div class="metric"><div class="ml">Расходы к прошлому мес.</div>
       <div class="mv" style="color:${dExp===null?"inherit":(dExp>0?E:P)}">${dExp===null?"—":(dExp>0?"+":"")+dExp+"%"}</div>
       <div class="mh">${fmt(cur.exp)} против ${fmt(prev.exp)}</div></div>
-    <div class="metric"><div class="ml">Хватит денег на</div>
+    <div class="metric metric-wide"><div class="ml">Хватит денег на</div>
       <div class="mv" style="color:${runwayCol}">${runwayVal}</div>
       <div class="mh">${runwayHint}</div></div>
   </div>`;
@@ -1038,8 +1086,14 @@ function renderEmojis(boxId,arr){
 }
 function pickEmoji(e,el){selEmoji=e;fixedEmojiAuto=false;el.parentElement.querySelectorAll("button").forEach(b=>b.classList.remove("sel"));el.classList.add("sel");}
 
-function openScrim(id){document.getElementById(id).classList.add("show");}
-function closeScrim(id){document.getElementById(id).classList.remove("show");}
+function openScrim(id){
+  document.getElementById(id).classList.add("show");
+  document.body.classList.add("scroll-lock"); // блокируем скролл страницы позади диалога
+}
+function closeScrim(id){
+  document.getElementById(id).classList.remove("show");
+  if(!document.querySelector(".scrim.show"))document.body.classList.remove("scroll-lock"); // снимаем блокировку, только если других открытых диалогов не осталось
+}
 
 function animateNum(id,to){
   const el=document.getElementById(id),from=parseFloat(el.dataset.v||"0");
@@ -1110,15 +1164,15 @@ document.getElementById("amtValue").addEventListener("keydown",e=>{if(e.key==="E
 ["txAmount","txNote"].forEach(id=>document.getElementById(id).addEventListener("keydown",e=>{if(e.key==="Enter")saveTxEdit();}));
 document.getElementById("aAmount").addEventListener("keydown",e=>{if(e.key==="Enter")saveAsset();});
 document.getElementById("histSearch").addEventListener("keydown",e=>{if(e.key==="Enter")e.preventDefault();});
-["liUser","liPass"].forEach(id=>document.getElementById(id).addEventListener("keydown",e=>{if(e.key==="Enter")doLogin();}));
+["liUser","liPass","liPass2","liCode","liApi"].forEach(id=>document.getElementById(id).addEventListener("keydown",e=>{if(e.key==="Enter")submitLoginForm();}));
 document.getElementById("logoutBtn").onclick=logout;
-["goalScrim","debtScrim","amtScrim","fixedScrim","fixInfoScrim","txScrim","dueScrim","assetScrim","fullHistoryScrim"].forEach(id=>document.getElementById(id).addEventListener("click",e=>{if(e.target.id===id)closeScrim(id);}));
+["goalScrim","debtScrim","amtScrim","fixedScrim","fixInfoScrim","txScrim","dueScrim","assetScrim","fullHistoryScrim","fullGoalsScrim","fullAssetsScrim","fullFixedScrim"].forEach(id=>document.getElementById(id).addEventListener("click",e=>{if(e.target.id===id)closeScrim(id);}));
 document.addEventListener("keydown",e=>{if(e.key==="Escape")document.querySelectorAll(".scrim.show").forEach(s=>s.classList.remove("show"));});
 window.addEventListener("scroll",()=>document.getElementById("appbar").classList.toggle("scrolled",window.scrollY>4));
 
 /* ---------- init ---------- */
 applyTheme();applyHideBalanceIcon();setType("exp");render();
-if(API){
+if(syncCapable){
   document.getElementById("syncChip").style.display="";
   document.getElementById("logoutBtn").style.display="";
   if(token){

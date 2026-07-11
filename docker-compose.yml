@@ -14,6 +14,9 @@ services:
       # в базе ещё вообще нет пользователей).
       # FIN_USER: myname
       # FIN_PASS: my-strong-password
+      # Если фронтенд отдаётся отдельно (напр. GitHub Pages), а этот контейнер — только API:
+      # ALLOWED_ORIGIN: https://burning-house.online
+      # REGISTER_CODE: some-secret-invite-code
     ports:
       # По умолчанию слушаем только на localhost — наружу отдаёт nginx (см. README-deploy.md).
       # Если хотите достучаться до контейнера напрямую без nginx, поменяйте на "8787:8787".

@@ -91,6 +91,18 @@
   /* ===================== BASE ===================== */
   *{box-sizing:border-box;margin:0;padding:0}
   html,body{height:100%}
+  body.scroll-lock{overflow:hidden}
+
+  /* ===================== ТОНКИЙ СКРОЛЛБАР В ЦВЕТ ТЕМЫ ===================== */
+  .scroll-thin{
+    scrollbar-width:thin;
+    scrollbar-color:var(--md-sys-color-outline-variant) transparent;
+    overscroll-behavior:contain; /* не даём скроллу "перетечь" на страницу за пределами контейнера */
+  }
+  .scroll-thin::-webkit-scrollbar{width:8px;height:8px}
+  .scroll-thin::-webkit-scrollbar-track{background:transparent}
+  .scroll-thin::-webkit-scrollbar-thumb{background:var(--md-sys-color-outline-variant);border-radius:var(--md-sys-shape-corner-full)}
+  .scroll-thin::-webkit-scrollbar-thumb:hover{background:var(--md-sys-color-outline)}
   body{
     font-family:var(--md-font);
     color:var(--md-sys-color-on-surface);
@@ -278,7 +290,7 @@
   }
   .field input:focus+label,.field select:focus~label{color:var(--md-sys-color-primary)}
   .row{display:flex;gap:12px}
-  .row>*{flex:1}
+  .row>*{flex:1;min-width:0}
 
   /* ===================== BUTTONS ===================== */
   .btn{position:relative;display:inline-flex;align-items:center;justify-content:center;gap:8px;height:48px;padding:0 24px;border:0;border-radius:var(--md-sys-shape-corner-full);font-family:inherit;font-size:15px;font-weight:600;cursor:pointer;overflow:hidden;transition:box-shadow .2s}
@@ -360,8 +372,13 @@
   .dialog .actions{display:flex;gap:8px;justify-content:flex-end;margin-top:22px}
   .dialog.dialog-lg{max-width:560px;max-height:85vh;display:flex;flex-direction:column}
   .full-history-list{flex:1;overflow-y:auto;margin-top:8px;min-height:0}
-  /* ниже базового z-index скримов — чтобы диалог редактирования, открытый ИЗ полной истории, был поверх неё */
-  #fullHistoryScrim{z-index:55}
+  /* ниже базового z-index скримов — чтобы диалог редактирования, открытый ИЗ диалога «показать всё», был поверх него */
+  #fullHistoryScrim,#fullGoalsScrim,#fullAssetsScrim,#fullFixedScrim{z-index:55}
+
+  /* ===================== ОГРАНИЧЕНИЕ ВЫСОТЫ СПИСКОВ (Цели/Активы/Обязательные) ===================== */
+  #goalList{max-height:400px;overflow-y:auto}
+  #assetItemsScroll{max-height:320px;overflow-y:auto}
+  #fixedList{max-height:340px;overflow-y:auto}
   .emoji-pick{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
   .emoji-pick button{width:46px;height:46px;border-radius:var(--md-sys-shape-corner-m);border:1px solid var(--md-sys-color-outline-variant);background:transparent;font-size:22px;cursor:pointer;transition:.15s}
   .emoji-pick button.sel{border:2px solid var(--md-sys-color-primary);background:var(--md-sys-color-primary-container)}
@@ -388,6 +405,7 @@
   .metric .ml{font-size:12px;color:var(--md-sys-color-on-surface-variant)}
   .metric .mv{font-size:21px;font-weight:700;letter-spacing:-.5px;margin-top:4px}
   .metric .mh{font-size:11px;color:var(--md-sys-color-on-surface-variant);margin-top:2px}
+  .metric.metric-wide{grid-column:1/-1}
   .mini-seg{display:inline-flex;background:var(--md-sys-color-surface-container);border-radius:var(--md-sys-shape-corner-full);padding:3px;margin-bottom:14px}
   .mini-seg button{border:0;background:transparent;color:var(--md-sys-color-on-surface-variant);padding:7px 16px;border-radius:var(--md-sys-shape-corner-full);font-family:inherit;font-size:13px;font-weight:600;cursor:pointer;transition:.2s}
   .mini-seg button.sel{background:var(--md-sys-color-surface-container-lowest);color:var(--md-sys-color-primary);box-shadow:var(--e1)}
