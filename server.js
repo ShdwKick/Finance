@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 /**
  * Мои финансы — backend синхронизации.
- * Чистый Node.js, без внешних зависимостей и без npm install.
+ * Чистый Node.js, без внешних зависимостей и без npm install
+ * (SQLite — встроенный модуль node:sqlite, ничего ставить не нужно).
  *
  * Запуск:            node server.js
  * Добавить юзера:    node server.js adduser <логин> <пароль>
@@ -11,17 +12,15 @@
  * Переменные окружения:
  *   PORT           (по умолчанию 8787)   — порт
  *   HOST           (по умолчанию 127.0.0.1) — интерфейс (за nginx оставляем localhost)
- *   DATA_DIR       (по умолчанию ./data) — где хранить store.json
+ *   DATA_DIR       (по умолчанию ./data) — где хранить store.db (SQLite)
  *   FIN_USER / FIN_PASS              — при первом запуске создаст этого пользователя,
  *                                      если в базе ещё никого нет.
  *   ALLOWED_ORIGIN — источник, которому разрешён доступ к /api/* (CORS), напр.
- *                    https://burning-house.online. Нужно, когда фронтенд отдаётся
- *                    отдельно (напр. GitHub Pages), а этот сервер — только API на
- *                    своём домене. Без переменной CORS-заголовки не отправляются
- *                    (подходит для варианта "фронт и API на одном домене").
- *   REGISTER_CODE  — если задан, /api/register требует этот код в поле "code"
- *                    (простая защита от случайной регистрации посторонних на
- *                    публично торчащем эндпоинте). Не задан — регистрация открыта всем.
+ *                    https://example.com. Нужно, только если фронтенд когда-нибудь
+ *                    будет отдаваться отдельно от этого сервера (сейчас не так —
+ *                    сервер отдаёт и фронт, и API с одного домена, CORS не нужен).
+ *   REGISTER_CODE  — если задан, /api/register требует этот код в поле "code".
+ *                    Не задан (по умолчанию) — регистрация открыта всем.
  */
 "use strict";
 
@@ -29,29 +28,66 @@ const http = require("http");
 const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
+const { DatabaseSync } = require("node:sqlite");
 
 const PORT = parseInt(process.env.PORT || "8787", 10);
 const HOST = process.env.HOST || "127.0.0.1";
 const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, "data");
 const ALLOWED_ORIGIN = process.env.ALLOWED_ORIGIN || "";
 const REGISTER_CODE = process.env.REGISTER_CODE || "";
-const STORE = path.join(DATA_DIR, "store.json");
+const DB_PATH = path.join(DATA_DIR, "store.db");
+const OLD_JSON_STORE = path.join(DATA_DIR, "store.json"); // старый формат — для одноразовой миграции
 const APP_HTML = path.join(__dirname, "index.html");
 const TOKEN_TTL = 60 * 24 * 60 * 60 * 1000; // 60 дней
 
-// ---------- хранилище ----------
+// ---------- хранилище (SQLite) ----------
 if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
 
-function loadStore() {
-  try { return JSON.parse(fs.readFileSync(STORE, "utf8")); }
-  catch { return { users: {}, states: {} }; }
+const dbIsNew = !fs.existsSync(DB_PATH);
+const db = new DatabaseSync(DB_PATH);
+db.exec("PRAGMA journal_mode = WAL"); // конкурентные чтения не блокируют запись
+db.exec(`
+  CREATE TABLE IF NOT EXISTS users (
+    username TEXT PRIMARY KEY,
+    salt TEXT NOT NULL,
+    hash TEXT NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS states (
+    username TEXT PRIMARY KEY REFERENCES users(username),
+    data TEXT,
+    updated_at INTEGER NOT NULL DEFAULT 0
+  );
+`);
+
+// одноразовая миграция со старого формата (плоский store.json), если он есть и SQLite-базы ещё не было
+if (dbIsNew && fs.existsSync(OLD_JSON_STORE)) {
+  try {
+    const old = JSON.parse(fs.readFileSync(OLD_JSON_STORE, "utf8"));
+    const insUser = db.prepare("INSERT OR REPLACE INTO users (username, salt, hash) VALUES (?, ?, ?)");
+    const insState = db.prepare("INSERT OR REPLACE INTO states (username, data, updated_at) VALUES (?, ?, ?)");
+    let n = 0;
+    for (const [username, u] of Object.entries(old.users || {})) {
+      insUser.run(username, u.salt, u.hash);
+      const st = (old.states || {})[username] || { data: null, updatedAt: 0 };
+      insState.run(username, st.data == null ? null : JSON.stringify(st.data), st.updatedAt || 0);
+      n++;
+    }
+    fs.renameSync(OLD_JSON_STORE, OLD_JSON_STORE + ".migrated");
+    console.log(`Миграция со старого store.json завершена: перенесено пользователей — ${n}. Старый файл сохранён как store.json.migrated.`);
+  } catch (e) {
+    console.error("Не удалось мигрировать старый store.json (продолжаю с пустой базой):", e.message);
+  }
 }
-function saveStore(s) {
-  const tmp = STORE + ".tmp";
-  fs.writeFileSync(tmp, JSON.stringify(s));
-  fs.renameSync(tmp, STORE); // атомарная запись
-}
-let store = loadStore();
+
+const stmt = {
+  getUser: db.prepare("SELECT username, salt, hash FROM users WHERE username = ?"),
+  countUsers: db.prepare("SELECT COUNT(*) AS n FROM users"),
+  listUsers: db.prepare("SELECT username FROM users ORDER BY username"),
+  upsertUser: db.prepare("INSERT INTO users (username, salt, hash) VALUES (?, ?, ?) ON CONFLICT(username) DO UPDATE SET salt = excluded.salt, hash = excluded.hash"),
+  ensureState: db.prepare("INSERT OR IGNORE INTO states (username, data, updated_at) VALUES (?, NULL, 0)"),
+  getState: db.prepare("SELECT data, updated_at FROM states WHERE username = ?"),
+  setState: db.prepare("INSERT INTO states (username, data, updated_at) VALUES (?, ?, ?) ON CONFLICT(username) DO UPDATE SET data = excluded.data, updated_at = excluded.updated_at"),
+};
 
 // ---------- пароли (scrypt, встроенный в Node) ----------
 function hashPassword(pw, salt) {
@@ -67,9 +103,21 @@ function verifyPassword(pw, salt, hash) {
 function setUser(username, password) {
   username = String(username).trim().toLowerCase();
   const { salt, hash } = hashPassword(password);
-  store.users[username] = { salt, hash };
-  if (!store.states[username]) store.states[username] = { data: null, updatedAt: 0 };
-  saveStore(store);
+  stmt.upsertUser.run(username, salt, hash);
+  stmt.ensureState.run(username);
+}
+function getUser(username) {
+  return stmt.getUser.get(String(username || "").trim().toLowerCase());
+}
+function getState(username) {
+  const row = stmt.getState.get(username);
+  if (!row) return { data: null, updatedAt: 0 };
+  return { data: row.data == null ? null : JSON.parse(row.data), updatedAt: row.updated_at };
+}
+function setState(username, data) {
+  const updatedAt = Date.now();
+  stmt.setState.run(username, JSON.stringify(data), updatedAt);
+  return updatedAt;
 }
 // общая проверка логина/пароля — используется и CLI adduser, и /api/register
 function validateCreds(username, password) {
@@ -103,17 +151,18 @@ if (cmd === "adduser" || cmd === "passwd") {
   process.exit(0);
 }
 if (cmd === "users") {
-  console.log(Object.keys(store.users).join("\n") || "(пусто)");
+  const rows = stmt.listUsers.all();
+  console.log(rows.map(r => r.username).join("\n") || "(пусто)");
   process.exit(0);
 }
 
 // первичный сид из env
-if (Object.keys(store.users).length === 0 && process.env.FIN_USER && process.env.FIN_PASS) {
+if (stmt.countUsers.get().n === 0 && process.env.FIN_USER && process.env.FIN_PASS) {
   setUser(process.env.FIN_USER, process.env.FIN_PASS);
   console.log("Создан первый пользователь из FIN_USER/FIN_PASS: " + process.env.FIN_USER.toLowerCase());
 }
-if (Object.keys(store.users).length === 0) {
-  console.log("[!] В базе нет пользователей. Создайте: node server.js adduser <логин> <пароль>");
+if (stmt.countUsers.get().n === 0) {
+  console.log("[!] В базе нет пользователей. Зарегистрируйтесь на сайте или создайте через CLI: node server.js adduser <логин> <пароль>");
 }
 
 // ---------- утилиты HTTP ----------
@@ -152,7 +201,7 @@ const MIME = {
   ".ico": "image/x-icon", ".woff2": "font/woff2"
 };
 const ASSETS_DIR = path.join(__dirname, "assets");
-// Отдаём ТОЛЬКО index.html и файлы из assets/. store.json, server.js и т.п. недоступны из вне.
+// Отдаём ТОЛЬКО index.html и файлы из assets/. store.db, server.js и т.п. недоступны из вне.
 function serveStatic(res, pathname) {
   if (pathname !== "/index.html" && !pathname.startsWith("/assets/")) return false;
   const file = path.join(__dirname, path.normalize(pathname).replace(/^([\\/])+/, ""));
@@ -171,9 +220,8 @@ const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, "http://x");
   const p = url.pathname;
 
-  // CORS: нужен, когда фронтенд отдаётся с другого домена (напр. GitHub Pages),
-  // а этот сервер — только API. Без ALLOWED_ORIGIN заголовки не шлём (тогда
-  // работает только сценарий "фронт и API на одном домене", как раньше).
+  // CORS: нужен, только если фронтенд когда-нибудь будет отдаваться с другого домена.
+  // Без ALLOWED_ORIGIN заголовки не шлём (обычный случай — всё на одном домене).
   if (ALLOWED_ORIGIN && p.startsWith("/api/")) {
     res.setHeader("Access-Control-Allow-Origin", ALLOWED_ORIGIN);
     res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, OPTIONS");
@@ -189,8 +237,7 @@ const server = http.createServer(async (req, res) => {
       const err = validateCreds(body.username, body.password);
       if (err) return json(res, 400, { error: err });
       const username = String(body.username).trim().toLowerCase();
-      store.users = loadStore().users; // подхватить пользователей, добавленных параллельно через CLI
-      if (store.users[username]) return json(res, 409, { error: "user exists" });
+      if (getUser(username)) return json(res, 409, { error: "user exists" });
       setUser(username, body.password);
       return json(res, 200, { token: issueToken(username) });
     } catch { return json(res, 400, { error: "bad request" }); }
@@ -200,14 +247,10 @@ const server = http.createServer(async (req, res) => {
   if (p === "/api/login" && req.method === "POST") {
     try {
       const body = JSON.parse(await readBody(req) || "{}");
-      const username = String(body.username || "").trim().toLowerCase();
-      // подхватываем пользователей, добавленных через CLI (adduser/passwd) пока сервер уже запущен —
-      // иначе `docker exec ... adduser` или запуск CLI рядом с systemd-сервисом молча не сработает без рестарта
-      store.users = loadStore().users;
-      const u = store.users[username];
+      const u = getUser(body.username);
       if (!u || !verifyPassword(String(body.password || ""), u.salt, u.hash))
         return json(res, 401, { error: "bad credentials" });
-      return json(res, 200, { token: issueToken(username) });
+      return json(res, 200, { token: issueToken(u.username) });
     } catch { return json(res, 400, { error: "bad request" }); }
   }
 
@@ -217,16 +260,14 @@ const server = http.createServer(async (req, res) => {
     if (!user) return json(res, 401, { error: "unauthorized" });
 
     if (req.method === "GET") {
-      const st = store.states[user] || { data: null, updatedAt: 0 };
-      return json(res, 200, st);
+      return json(res, 200, getState(user));
     }
     if (req.method === "PUT") {
       try {
         const body = JSON.parse(await readBody(req) || "{}");
         if (typeof body.data !== "object" || body.data === null) return json(res, 400, { error: "no data" });
-        store.states[user] = { data: body.data, updatedAt: Date.now() };
-        saveStore(store);
-        return json(res, 200, { ok: true, updatedAt: store.states[user].updatedAt });
+        const updatedAt = setState(user, body.data);
+        return json(res, 200, { ok: true, updatedAt });
       } catch { return json(res, 400, { error: "bad request" }); }
     }
     return json(res, 405, { error: "method not allowed" });
@@ -244,5 +285,5 @@ const server = http.createServer(async (req, res) => {
 });
 
 server.listen(PORT, HOST, () => {
-  console.log(`Мои финансы: http://${HOST}:${PORT}  (данные: ${STORE})`);
+  console.log(`Мои финансы: http://${HOST}:${PORT}  (данные: ${DB_PATH})`);
 });

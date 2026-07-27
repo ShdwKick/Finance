@@ -1,336 +1,283 @@
-# Развёртывание «Мои финансы» на сервере Ubuntu 24.04
+# Развёртывание «Мои финансы» на своём сервере
 
-## ⚡ Актуальный план деплоя (образ из Docker Hub, домен burninghouse.ru)
+Это личный трекер финансов — статическая страница (`index.html` + `assets/`) плюс
+маленький сервер синхронизации (`server.js`, чистый Node.js, без единой npm-зависимости
+— даже хранилище встроенное, SQLite через `node:sqlite`). Один сервер отдаёт и то, и
+другое с одного домена: открываете `https://ваш-домен` — видите приложение, оно само
+стучится на `/api/...` за данными.
 
-Образ уже собран и запушен: `shadowkick/finance:latest` (публичный, `docker login` на
-сервере не нужен). Ниже — весь путь от чистого сервера до рабочего HTTPS. Выполняется
-**на сервере по SSH**, шаг за шагом, не всё разом — после шага 0 проверьте вывод, прежде
-чем продолжать.
+Деплой можно свести к одному вопросу: **найти на сервере домен и порт, которые никому
+не мешают, и настроить на них HTTPS.** Всё остальное — детали. Ниже — как это сделать
+через Docker (самый простой путь) и вариант без Docker для тех, кому он не нужен.
 
+## Ваши значения для этого деплоя
 
-### Шаг 1. Docker (если ещё не установлен)
+Инструкции ниже написаны с плейсхолдерами (`<домен>`, `<порт>` и т.д.), чтобы годились
+для любого сервера. Вот что подставлено на реальном сервере, где приложение сейчас
+живёт — для справки и как пример того, как это выглядит в жизни:
+
+| Плейсхолдер | Значение здесь | Почему |
+|---|---|---|
+| `<домен>` | `money.burninghouse.ru` | Отдельный от `burning-house.online` (тот был для GitHub Pages, которую больше не используем) |
+| `<порт>` | `9443` | 443 занят xray (VLESS), 8443/udp занят Hysteria2 — см. «Проверьте порты» ниже |
+| `<docker-образ>` | `shadowkick/finance:latest` | Публичный образ на Docker Hub |
+| репозиторий | `github.com/ShdwKick/Finance` | — |
+
+Регистрация на этом сервере открыта всем (без кода-приглашения) — так решили сознательно.
+
+---
+
+## Путь 1: Docker (рекомендуется)
+
+### Шаг 1. Соберите образ и опубликуйте его в registry
+
+Один раз, с рабочей машины, где лежит код:
+
+```bash
+docker build -t <docker-hub-логин>/finance:latest .
+docker login -u <docker-hub-логин>   # логин/пароль вводите сами, не через скрипт
+docker push <docker-hub-логин>/finance:latest
+```
+
+Если репозиторий на Docker Hub публичный (по умолчанию так) — на сервере логиниться
+не придётся, просто `docker pull`.
+
+### Шаг 2. Проверьте порты на сервере
+
+Прежде чем занимать что-либо портом наружу — посмотрите, что уже слушает сервер:
+
+```bash
+sudo ss -tulpn
+```
+
+Если на сервере уже есть VPN (Hysteria2, 3x-ui/xray, WireGuard и т.п.) или другие
+сервисы — почти наверняка что-то уже сидит на 443 (VPN-протоколы часто маскируются
+под HTTPS специально, чтобы не выделяться). Правило простое: **приложению не обязательно
+жить на 443**, любой свободный порт подойдёт — 8443, 9443, что угодно. Найдите в выводе
+`ss` порт, которого там нет, и используйте его.
+
+Так, например, выглядела реальная проверка на одном сервере — оказалось, что 443/tcp
+занят xray, 8443 (тот порт, который сначала казался очевидным запасным вариантом)
+занят Hysteria2 по UDP, а 9443 свободен:
+
+```
+tcp   LISTEN  *:443    xray-linux-amd64     ← занято, не трогаем
+udp   UNCONN  *:8443   hysteria             ← тоже занято, хоть и другой протокол
+                                               (порт 9443 в выводе не встретился — свободен)
+```
+
+Отсюда и взялся `<порт> = 9443` в примере выше. Ваш сервер — ваш собственный вывод
+`ss`, порт может оказаться другим. Порт 80 обычно тоже стоит оставить свободным —
+`certbot` использует его на секунду для подтверждения домена.
+
+### Шаг 3. Установите Docker (если ещё не установлен)
 
 ```bash
 curl -fsSL https://get.docker.com | sudo sh
 ```
 
-### Шаг 2. Скачать и запустить контейнер
+### Шаг 4. Скачайте и запустите контейнер
 
 ```bash
 git clone https://github.com/ShdwKick/Finance.git ~/finance
 cd ~/finance
 cp docker-compose.prod.yml docker-compose.yml
+# откройте docker-compose.yml и поправьте image: на свой <docker-hub-логин>/finance:latest
 
 sudo docker compose pull
 sudo docker compose up -d
-sudo docker compose logs -f finance   # Ctrl+C для выхода, контейнер продолжит работать
+sudo docker compose logs -f finance   # Ctrl+C выходит из просмотра, контейнер продолжает работать
 curl -s http://127.0.0.1:8787/api/health   # ожидаем {"ok":true}
 ```
 
-### Шаг 3. Создать пользователя для входа в приложение
+Контейнер слушает только `127.0.0.1:8787` — снаружи не виден напрямую, наружу его
+выставит nginx на следующем шаге.
 
-```bash
-sudo docker exec finance node server.js adduser myname 'МойСильныйПароль'
-```
+### Шаг 5. DNS
 
-### Шаг 4. DNS
+У регистратора домена добавьте **A-запись**: поддомен → IP сервера (тот же IP, что и у
+остальных сервисов на сервере — это нормально, они различаются портами, не IP).
+Подождите, пока запись разойдётся: `ping <домен>`.
 
-У регистратора `burninghouse.ru` добавьте **A-запись**: `money` → IP этого сервера
-(тот же IP, что у VPN — это нормально, разные порты). Дождитесь распространения:
-`ping money.burninghouse.ru`.
-
-### Шаг 5. Сертификат и nginx на порту 9443 (не 443, не 8443!)
+### Шаг 6. Сертификат и nginx на выбранном порту
 
 ```bash
 sudo apt install -y nginx certbot
-sudo certbot certonly --standalone -d money.burninghouse.ru
-# ^ на секунду займёт порт 80 для проверки домена, затем освободит. Остальные порты не трогает.
-
-sudo cp ~/finance/deploy/nginx-finance-9443.conf /etc/nginx/sites-available/finance
-sudo ln -s /etc/nginx/sites-available/finance /etc/nginx/sites-enabled/
-sudo nginx -t && sudo systemctl reload nginx
-sudo ufw allow 9443/tcp   # если включён firewall — остальные порты не трогаем
+sudo certbot certonly --standalone -d <домен>
+# на секунду займёт порт 80 для проверки домена, затем освободит
 ```
 
-Готово: `https://money.burninghouse.ru:9443` должен открыть страницу входа.
-
-### Шаг 6. Подключить фронтенд на GitHub Pages
-
-На `https://burning-house.online` откройте форму входа → поле **«Адрес сервера»** →
-впишите `https://money.burninghouse.ru:9443` → войдите тем логином из шага 3.
-Адрес сохранится в браузере, вводить повторно не нужно.
-
-### Обновление образа в будущем
-
-Локально (на этой машине): `docker build -t shadowkick/finance:latest . && docker push shadowkick/finance:latest`.
-На сервере: `cd ~/finance && sudo docker compose pull && sudo docker compose up -d` — данные (volume) не тронет.
-
----
-
-## Общая справка (все варианты деплоя, включая bare-metal и вариант без Docker)
-
-Приложение = один статический файл `index.html` + маленький сервер синхронизации
-`server.js` (чистый Node.js, **без npm install**, без внешних зависимостей).
-Данные всех устройств хранятся на сервере в `data/store.json`, вход по логину и паролю.
-
-Итог: `https://money.ВАШ-ДОМЕН` — открывается и с телефона, и с ПК, данные общие.
-
----
-
-## 0. Не сломает ли это VPN (hysteria + 3x-ui)?
-
-Нет, если правильно занять порты. Проверьте, что слушается на TCP 80/443:
-
-```bash
-sudo ss -tlnp | grep -E ':(80|443)\b'
-```
-
-- **Hysteria2** работает по **UDP/443** (QUIC) — nginx на **TCP** ему не мешает.
-- **3x-ui**: сама панель на своём порту (её не трогаем). Но если в 3x-ui есть
-  входящий **Reality/VLESS на TCP 443**, то TCP 443 занят — см. «Вариант Б» ниже.
-
-Если в выводе выше **TCP 80 и 443 свободны** → делайте по основному пути (Вариант А).
-Если **TCP 443 занят** (xray/reality) → Вариант Б (приложение на порту 8443).
-
----
-
-## Способ деплоя: bare-metal или Docker?
-
-Ниже два независимых пути установить само приложение (шаги 1–4). Дальше (DNS,
-nginx, HTTPS — шаги 5–6) — одинаково для обоих. Выбирайте один:
-
-- **Bare-metal** (Node.js прямо на сервере, systemd) — шаги 1–4 ниже как есть.
-- **Docker** — см. отдельный раздел «Деплой через Docker» в конце файла, затем
-  сразу переходите к шагам 5–6.
-
----
-
-## 1. Установить Node.js и nginx
-
-```bash
-sudo apt update
-sudo apt install -y nginx
-# Node.js 20 LTS из репозитория NodeSource:
-curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
-sudo apt install -y nodejs
-node -v   # должно показать v20.x
-```
-
-## 2. Скопировать файлы на сервер
-
-Приложение теперь состоит из нескольких файлов (`index.html`, `server.js` и папка
-`assets/`), поэтому копируем папку целиком. С вашего ПК (PowerShell), замените `SERVER_IP`:
-
-```powershell
-scp -r "F:\Рабэта\Финансы" root@SERVER_IP:/tmp/finance
-```
-
-На сервере:
-
-```bash
-sudo mkdir -p /opt/finance
-sudo cp -r /tmp/finance/index.html /tmp/finance/server.js /tmp/finance/assets /opt/finance/
-sudo useradd -r -s /usr/sbin/nologin finance   # системный пользователь без входа
-sudo mkdir -p /opt/finance/data
-sudo chown -R finance:finance /opt/finance
-```
-
-> Структура на сервере: `/opt/finance/{index.html, server.js, assets/{styles.css,core.js,app.js}, data/}`.
-> Сервер отдаёт наружу только `index.html` и `assets/*`; папки `data/` (с паролями) и
-> сам `server.js` через веб недоступны.
-
-## 3. Создать пользователя приложения (логин/пароль для входа в сайт)
-
-```bash
-cd /opt/finance
-sudo -u finance node server.js adduser myname 'МойСильныйПароль'
-# добавить второго (например, для жены/партнёра, общие данные — тот же логин;
-# отдельные данные — отдельный логин):
-# sudo -u finance node server.js adduser second 'ДругойПароль'
-```
-
-## 4. Запустить как службу (systemd)
-
-```bash
-sudo cp /opt/finance/deploy/finance.service /etc/systemd/system/   # или создайте файл вручную (см. deploy/finance.service)
-sudo systemctl daemon-reload
-sudo systemctl enable --now finance
-sudo systemctl status finance      # должно быть active (running)
-curl -s http://127.0.0.1:8787/api/health   # {"ok":true}
-```
-
-> Файл `finance.service` лежит в папке `deploy/`. Если копировали только index.html и
-> server.js — просто создайте `/etc/systemd/system/finance.service` с его содержимым.
-
-## 5. DNS: поддомен
-
-У регистратора домена добавьте **A-запись**:
-`money` → IP вашего сервера (тот же, что у VPN-домена, это нормально).
-Дождитесь распространения (обычно минуты): `ping money.ВАШ-ДОМЕН`.
-
-## 6. nginx + HTTPS
-
-### Вариант А — TCP 80/443 свободны (обычный случай)
-
-```bash
-# конфиг (замените money.example.com на свой поддомен в файле):
-sudo cp /opt/finance/deploy/nginx-finance.conf /etc/nginx/sites-available/finance
-sudo nano /etc/nginx/sites-available/finance     # поправьте server_name
-sudo ln -s /etc/nginx/sites-available/finance /etc/nginx/sites-enabled/
-sudo nginx -t && sudo systemctl reload nginx
-
-# бесплатный сертификат Let's Encrypt (сам пропишет HTTPS-блок и редирект):
-sudo apt install -y certbot python3-certbot-nginx
-sudo certbot --nginx -d money.ВАШ-ДОМЕН
-```
-
-Готово: откройте `https://money.ВАШ-ДОМЕН`.
-
-### Вариант Б — TCP 443 занят Reality/xray
-
-Разместите приложение на **TCP 8443** (443 остаётся у VPN). В конфиге nginx
-замените `listen 80;`/`listen [::]:80;` и добавьте TLS вручную, либо проще —
-получите сертификат в режиме webroot/standalone и слушайте 8443:
-
-```bash
-# 1) временно откройте 80 только для выдачи сертификата (если 80 свободен):
-sudo certbot certonly --standalone -d money.ВАШ-ДОМЕН
-# сертификат появится в /etc/letsencrypt/live/money.ВАШ-ДОМЕН/
-```
-
-Затем конфиг nginx на 8443 (создайте /etc/nginx/sites-available/finance):
+Конфиг nginx (замените `<домен>` и `<порт>` на свои):
 
 ```nginx
 server {
-    listen 8443 ssl;
-    listen [::]:8443 ssl;
-    server_name money.ВАШ-ДОМЕН;
-    ssl_certificate     /etc/letsencrypt/live/money.ВАШ-ДОМЕН/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/money.ВАШ-ДОМЕН/privkey.pem;
+    listen <порт> ssl;
+    listen [::]:<порт> ssl;
+    server_name <домен>;
+
+    ssl_certificate     /etc/letsencrypt/live/<домен>/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/<домен>/privkey.pem;
+
     client_max_body_size 10m;
+
     location / {
         proxy_pass http://127.0.0.1:8787;
-        proxy_set_header Host $host;
+        proxy_http_version 1.1;
+        proxy_set_header Host              $host;
+        proxy_set_header X-Real-IP         $remote_addr;
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto https;
+        proxy_read_timeout 60s;
     }
 }
 ```
 
+Готовый файл под конкретно этот деплой (порт 9443, домен money.burninghouse.ru) лежит
+в `deploy/nginx-finance-9443.conf` — можно взять как есть или как образец для своих
+значений.
+
 ```bash
+sudo cp deploy/nginx-finance-9443.conf /etc/nginx/sites-available/finance   # или свой файл с шаблона выше
 sudo ln -s /etc/nginx/sites-available/finance /etc/nginx/sites-enabled/
 sudo nginx -t && sudo systemctl reload nginx
-sudo ufw allow 8443/tcp   # если включён firewall
+sudo ufw allow <порт>/tcp   # если включён firewall
 ```
 
-Открывать: `https://money.ВАШ-ДОМЕН:8443`.
+Готово: `https://<домен>:<порт>` должен открыть страницу входа.
+
+### Шаг 7. Первый пользователь
+
+Просто откройте сайт и зарегистрируйтесь через форму («Нет аккаунта?
+Зарегистрироваться») — отдельная команда не нужна. По умолчанию регистрация открыта
+всем в интернете; если хотите закрыть её кодом-приглашением — раскомментируйте
+`REGISTER_CODE` в `docker-compose.yml` (свой секрет вместо примера) и перезапустите
+`docker compose up -d`. CLI-способ тоже работает, если понадобится создать пользователя
+без доступа к сайту: `docker exec finance node server.js adduser <логин> <пароль>`.
+
+### Обновление в будущем
+
+Собрали новую версию → `docker build ... && docker push ...` (шаг 1) → на сервере
+`cd ~/finance && sudo docker compose pull && sudo docker compose up -d`. Данные (том
+`finance-data`) при этом не трогаются.
 
 ---
 
-## Обновление приложения в будущем
+## Хранилище: SQLite
 
-Скопируйте изменившиеся файлы — `index.html`, папку `assets/` и/или `server.js` — в
-`/opt/finance/`, затем:
+Данные лежат в `data/store.db` — SQLite через встроенный в Node.js модуль `node:sqlite`
+(ничего дополнительно ставить не нужно, но версия Node важна: **24 и новее**, на более
+старых модуль либо отсутствует, либо экспериментальный и может вести себя нестабильно).
+
+У каждого пользователя своя строка в базе, обновляется независимо от остальных — в
+отличие от более раннего формата (один общий JSON-файл, который целиком перезаписывался
+при изменении любого пользователя), это нормально масштабируется даже при открытой
+для всех регистрации.
+
+Если на сервере уже был старый `data/store.json` — при первом запуске новой версии
+сервер сам перенесёт данные в `store.db`, а старый файл переименует в
+`store.json.migrated` (не удаляет, на всякий случай). Об этом будет строка в логах.
+
+Экспорт/импорт данных **внутри самого приложения** («Сохранить копию» / «Загрузить
+копию» в интерфейсе) как был в формате JSON, так и остался — это отдельный, чисто
+клиентский механизм, серверного хранилища не касается.
+
+### Резервная копия
+
+Файл активно используется сервером, поэтому не просто копируйте его — используйте
+`.backup`, он даёт консистентный снимок на лету, без остановки сервиса:
 
 ```bash
-sudo chown -R finance:finance /opt/finance/index.html /opt/finance/assets /opt/finance/server.js
-sudo systemctl restart finance
+# Docker:
+docker run --rm -v moi-finansy_finance-data:/data -v $(pwd):/backup alpine sh -c \
+  "apk add --no-cache sqlite && sqlite3 /data/store.db '.backup /backup/finance-backup-$(date +%F).db'"
+
+# без Docker:
+sudo apt install -y sqlite3   # один раз
+sqlite3 /opt/finance/data/store.db ".backup ~/finance-backup-$(date +%F).db"
 ```
 
-Данные пользователей (`data/store.json`) при этом не трогаются.
+---
 
-## Резервная копия данных
+## Путь 2: без Docker (bare-metal + systemd)
+
+Если Docker на сервере не нужен или нежелателен — то же самое, но напрямую.
+
+**1. Node.js 24+ и nginx:**
 
 ```bash
-sudo cp /opt/finance/data/store.json ~/finance-backup-$(date +%F).json
+sudo apt update && sudo apt install -y nginx
+curl -fsSL https://deb.nodesource.com/setup_24.x | sudo -E bash -
+sudo apt install -y nodejs
+node -v   # v24.x — важно для SQLite, см. выше
 ```
+
+**2. Скопируйте файлы приложения** (`index.html`, `server.js`, `assets/`) в `/opt/finance`
+и заведите системного пользователя без входа:
+
+```bash
+sudo mkdir -p /opt/finance/data
+sudo cp -r index.html server.js assets /opt/finance/
+sudo useradd -r -s /usr/sbin/nologin finance
+sudo chown -R finance:finance /opt/finance
+```
+
+**3. Служба systemd** — шаблон уже готов в `deploy/finance.service`:
+
+```bash
+sudo cp deploy/finance.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now finance
+sudo systemctl status finance      # active (running)
+curl -s http://127.0.0.1:8787/api/health   # {"ok":true}
+```
+
+**4. DNS, сертификат, nginx** — те же шаги 5–6 из пути с Docker (проверка портов,
+`certbot certonly --standalone`, конфиг nginx с `proxy_pass http://127.0.0.1:8787`).
+Обычный (не занятый VPN) генерический конфиг на порт 80/443 — в `deploy/nginx-finance.conf`,
+если 443 свободен и переносить приложение на отдельный порт не требуется.
+
+**5. Первый пользователь** — так же через регистрацию на сайте, либо
+`sudo -u finance node /opt/finance/server.js adduser <логин> <пароль>`.
+
+### Обновление
+
+Скопируйте изменившиеся файлы в `/opt/finance/`, затем `sudo systemctl restart finance`.
+Данные (`data/store.db`) не трогаются.
+
+---
 
 ## Полезные команды
 
 ```bash
-sudo systemctl status finance         # состояние
-sudo journalctl -u finance -f         # логи в реальном времени
-sudo -u finance node /opt/finance/server.js users     # список логинов
-sudo -u finance node /opt/finance/server.js passwd myname 'НовыйПароль'  # смена пароля
-```
-
-## Как это работает (кратко)
-
-- Открыли `index.html` **двойным кликом** (file://) → работает офлайн, данные в браузере
-  (как раньше). Логин не спрашивается.
-- Открыли по `https://…` → приложение видит сервер, просит логин, тянет данные с сервера
-  и на каждое изменение отправляет их обратно. На всех устройствах — одни и те же данные.
-- Пароли хранятся не в открытом виде (scrypt-хэш). Токен входа живёт 60 дней.
-
----
-
-## Деплой через Docker (альтернатива шагам 1–4)
-
-Один образ, без внешних зависимостей (в `server.js` их и так нет). Проверено вживую:
-сборка, `docker compose up`, создание пользователя, рестарт с сохранением данных
-в volume — всё отработало на этой машине перед тем, как эти файлы попали в репозиторий.
-
-### Установка Docker на сервере (если ещё нет)
-
-```bash
-curl -fsSL https://get.docker.com | sudo sh
-sudo usermod -aG docker $USER   # затем перелогиньтесь, либо каждую команду через sudo
-```
-
-### Запуск
-
-```bash
-cd /opt/finance   # или куда скопировали репозиторий
-docker compose up -d --build
-docker compose logs -f finance   # Ctrl+C для выхода из просмотра логов, контейнер продолжит работать
-```
-
-По умолчанию контейнер слушает **только на 127.0.0.1:8787** — снаружи не виден,
-как и bare-metal-вариант. Наружу отдаёт nginx (шаги 5–6 выше, `proxy_pass
-http://127.0.0.1:8787;` — без изменений).
-
-### Создать пользователя
-
-```bash
-docker exec finance node server.js adduser myname 'МойСильныйПароль'
-```
-
-Сработает сразу, без перезапуска контейнера — сервер подхватывает новых
-пользователей "на лету" при следующей попытке входа.
-
-Либо ещё проще — задать первого пользователя через переменные окружения
-**до первого запуска** (создаст пользователя автоматически, если база пуста):
-раскомментируйте `FIN_USER`/`FIN_PASS` в `docker-compose.yml`, затем
-`docker compose up -d --build`. После первого раза эти строки можно убрать —
-на существующих пользователей они не влияют.
-
-### Данные
-
-Хранятся в именованном Docker-volume `finance-data`, монтируется в `/app/data`
-внутри контейнера. Переживает `docker compose down` (без флага `-v`) и рестарты.
-Резервная копия:
-
-```bash
-docker run --rm -v moi-finansy_finance-data:/data -v $(pwd):/backup alpine \
-  cp /data/store.json /backup/finance-backup-$(date +%F).json
-```
-
-### Обновление приложения
-
-```bash
-cd /opt/finance
-git pull            # если репозиторий на сервере
-docker compose up -d --build
-```
-
-Данные (volume) при пересборке не трогаются.
-
-### Полезные команды
-
-```bash
+# Docker:
 docker compose ps                              # статус
 docker compose logs -f finance                 # логи
 docker exec finance node server.js users       # список логинов
-docker exec finance node server.js passwd myname 'НовыйПароль'
+docker exec finance node server.js passwd <логин> <пароль>   # сменить пароль
 docker compose down                            # остановить (данные сохранятся)
 docker compose down -v                         # остановить И стереть данные (осторожно!)
+
+# bare-metal:
+sudo systemctl status finance
+sudo journalctl -u finance -f
+sudo -u finance node /opt/finance/server.js users
+sudo -u finance node /opt/finance/server.js passwd <логин> <пароль>
 ```
+
+## Переменные окружения сервера
+
+Полный список — в шапке `server.js`. Основные:
+
+- `PORT`, `HOST`, `DATA_DIR` — где слушать и куда писать данные.
+- `FIN_USER` / `FIN_PASS` — создать первого пользователя автоматически при пустой базе.
+- `REGISTER_CODE` — если задан, для регистрации через сайт нужен этот код (иначе открыта всем).
+- `ALLOWED_ORIGIN` — включает CORS для `/api/*`. Нужен, только если фронтенд и сервер
+  когда-нибудь снова окажутся на разных доменах (сейчас не так — всё на одном).
+
+## Как это работает вкратце
+
+- Открыли `index.html` двойным кликом (`file://`) — работает офлайн, данные в браузере,
+  логина не спросит.
+- Открыли по `https://` — приложение видит сервер, просит войти или зарегистрироваться,
+  дальше синхронизирует данные на все устройства.
+- Пароли хранятся хэшированными (scrypt), не в открытом виде. Токен входа живёт 60 дней.
