@@ -7,16 +7,6 @@
 **на сервере по SSH**, шаг за шагом, не всё разом — после шага 0 проверьте вывод, прежде
 чем продолжать.
 
-### Шаг 0. Проверить порты — САМОЕ ВАЖНОЕ, чтобы не задеть VPN
-
-```bash
-sudo ss -tulpn | grep -E ':80\b|:443\b|:8443\b'
-```
-
-Ожидается: **443/udp** занят Hysteria2 (это нормально, не трогаем), возможно **443/tcp**
-занят 3x-ui/Reality (тоже не трогаем — именно поэтому ниже используется порт **8443**,
-а не 443). Порты **80/tcp** и **8443/tcp** должны быть свободны (пусто в выводе grep для них).
-Если 8443 чем-то занят — остановитесь и напишите мне, подберём другой порт.
 
 ### Шаг 1. Docker (если ещё не установлен)
 
@@ -27,9 +17,9 @@ curl -fsSL https://get.docker.com | sudo sh
 ### Шаг 2. Скачать и запустить контейнер
 
 ```bash
-mkdir -p ~/finance && cd ~/finance
-curl -o docker-compose.yml https://raw.githubusercontent.com/ShdwKick/Finance/main/docker-compose.prod.yml
-# либо просто создайте docker-compose.yml вручную с содержимым файла docker-compose.prod.yml из репозитория
+git clone https://github.com/ShdwKick/Finance.git ~/finance
+cd ~/finance
+cp docker-compose.prod.yml docker-compose.yml
 
 sudo docker compose pull
 sudo docker compose up -d
@@ -49,25 +39,25 @@ sudo docker exec finance node server.js adduser myname 'МойСильныйПа
 (тот же IP, что у VPN — это нормально, разные порты). Дождитесь распространения:
 `ping money.burninghouse.ru`.
 
-### Шаг 5. Сертификат и nginx на порту 8443 (не 443!)
+### Шаг 5. Сертификат и nginx на порту 9443 (не 443, не 8443!)
 
 ```bash
 sudo apt install -y nginx certbot
 sudo certbot certonly --standalone -d money.burninghouse.ru
-# ^ на секунду займёт порт 80 для проверки домена, затем освободит. Порт 443 не трогает.
+# ^ на секунду займёт порт 80 для проверки домена, затем освободит. Остальные порты не трогает.
 
-sudo cp ~/finance/deploy/nginx-finance-8443.conf /etc/nginx/sites-available/finance
+sudo cp ~/finance/deploy/nginx-finance-9443.conf /etc/nginx/sites-available/finance
 sudo ln -s /etc/nginx/sites-available/finance /etc/nginx/sites-enabled/
 sudo nginx -t && sudo systemctl reload nginx
-sudo ufw allow 8443/tcp   # если включён firewall — остальные порты (443 udp/tcp) не трогаем
+sudo ufw allow 9443/tcp   # если включён firewall — остальные порты не трогаем
 ```
 
-Готово: `https://money.burninghouse.ru:8443` должен открыть страницу входа.
+Готово: `https://money.burninghouse.ru:9443` должен открыть страницу входа.
 
 ### Шаг 6. Подключить фронтенд на GitHub Pages
 
 На `https://burning-house.online` откройте форму входа → поле **«Адрес сервера»** →
-впишите `https://money.burninghouse.ru:8443` → войдите тем логином из шага 3.
+впишите `https://money.burninghouse.ru:9443` → войдите тем логином из шага 3.
 Адрес сохранится в браузере, вводить повторно не нужно.
 
 ### Обновление образа в будущем

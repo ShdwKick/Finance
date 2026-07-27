@@ -29,9 +29,7 @@ services:
       # FIN_USER: myname
       # FIN_PASS: my-strong-password
     ports:
-      # Только на localhost — наружу отдаёт nginx на порту 8443 (см. README-deploy.md).
-      # ВАЖНО для этого сервера: порт 443 (TCP и UDP) уже занят VPN (3x-ui/VLESS и Hysteria2),
-      # поэтому приложение сознательно вынесено на отдельный порт 8443, а не на стандартный 443.
+      # Только на localhost — наружу отдаёт nginx на порту 9443 (см. README-deploy.md).
       - "127.0.0.1:8787:8787"
     volumes:
       - finance-data:/app/data
