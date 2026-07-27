@@ -82,18 +82,40 @@
         </div>
         <div class="row">
           <div class="field">
-            <input id="amount" type="text" inputmode="decimal" placeholder=" " oninput="sanitizeAmt(this)">
+            <input id="amount" class="has-calc" type="text" inputmode="decimal" placeholder=" " oninput="sanitizeAmt(this)">
             <label for="amount">Сумма, ₽</label>
+            <button type="button" class="icon-btn xs calc-trigger" onclick="openCalc('amount')" title="Калькулятор" aria-label="Калькулятор">
+              <svg class="icon sm" viewBox="0 0 24 24"><rect x="4" y="2" width="16" height="20" rx="2"/><line x1="8" y1="6" x2="16" y2="6"/>
+                <circle cx="8" cy="10" r="1" fill="currentColor" stroke="none"/><circle cx="12" cy="10" r="1" fill="currentColor" stroke="none"/><circle cx="16" cy="10" r="1" fill="currentColor" stroke="none"/>
+                <circle cx="8" cy="14" r="1" fill="currentColor" stroke="none"/><circle cx="12" cy="14" r="1" fill="currentColor" stroke="none"/><circle cx="16" cy="14" r="1" fill="currentColor" stroke="none"/>
+                <circle cx="8" cy="18" r="1" fill="currentColor" stroke="none"/><circle cx="12" cy="18" r="1" fill="currentColor" stroke="none"/><circle cx="16" cy="18" r="1" fill="currentColor" stroke="none"/></svg>
+            </button>
           </div>
           <div class="field filled">
-            <select id="category"></select>
+            <select id="category" onchange="updateRefundField()"></select>
             <svg class="chev icon sm" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"/></svg>
             <label>Категория</label>
           </div>
         </div>
-        <div class="field">
-          <input id="note" type="text" placeholder=" ">
-          <label for="note">Комментарий (необязательно)</label>
+        <div class="field filled" id="refundForField" style="display:none">
+          <select id="refundFor"></select>
+          <svg class="chev icon sm" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"/></svg>
+          <label>За какой расход</label>
+        </div>
+        <div class="field filled" id="paySourceField" style="display:none">
+          <select id="paySource"></select>
+          <svg class="chev icon sm" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"/></svg>
+          <label>Оплата</label>
+        </div>
+        <div class="row">
+          <div class="field">
+            <input id="note" type="text" placeholder=" ">
+            <label for="note">Комментарий (необязательно)</label>
+          </div>
+          <div class="field filled" style="flex:0 0 auto;width:170px">
+            <input id="txDate" type="date">
+            <label for="txDate">Дата</label>
+          </div>
         </div>
         <button class="btn filled full" onclick="addTx()">
           <svg class="icon sm" viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
@@ -235,6 +257,7 @@
           </div>
         </div>
         <div id="assetSumline"></div>
+        <div id="piggyBox"></div>
         <div id="assetItemsScroll" class="scroll-thin"></div>
       </div>
 
@@ -303,18 +326,71 @@
 <div class="scrim" id="debtScrim">
   <div class="dialog">
     <h3 id="debtTitle">Новый долг</h3>
-    <div class="desc">Кредит, ипотека, рассрочка или долг</div>
-    <div class="field"><input id="dName" type="text" placeholder=" "><label for="dName">Название</label></div>
-    <div class="row">
-      <div class="field"><input id="dTotal" type="text" inputmode="decimal" placeholder=" " oninput="sanitizeAmt(this)"><label for="dTotal">Всего взято, ₽</label></div>
-      <div class="field"><input id="dRemain" type="text" inputmode="decimal" placeholder=" " oninput="sanitizeAmt(this)"><label for="dRemain">Осталось, ₽</label></div>
+    <div class="desc">Кредит, ипотека, рассрочка, долг или кредитная карта</div>
+    <div class="segmented">
+      <button id="dKindLoan" class="sel" onclick="setDebtKind('loan')">
+        <svg class="check icon sm" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>Кредит / долг
+      </button>
+      <button id="dKindCard" onclick="setDebtKind('card')">
+        <svg class="check icon sm" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>Кредитка
+      </button>
     </div>
-    <div class="field"><input id="dMonthly" type="text" inputmode="decimal" placeholder=" " oninput="sanitizeAmt(this)"><label for="dMonthly">Платёж в месяц, ₽</label></div>
+    <div class="field"><input id="dName" type="text" placeholder=" "><label for="dName">Название</label></div>
+    <div id="debtLoanFields">
+      <div class="row">
+        <div class="field"><input id="dTotal" type="text" inputmode="decimal" placeholder=" " oninput="sanitizeAmt(this)"><label for="dTotal">Всего взято, ₽</label></div>
+        <div class="field"><input id="dRemain" type="text" inputmode="decimal" placeholder=" " oninput="sanitizeAmt(this)"><label for="dRemain">Осталось, ₽</label></div>
+      </div>
+      <div class="field"><input id="dMonthly" type="text" inputmode="decimal" placeholder=" " oninput="sanitizeAmt(this)"><label for="dMonthly">Платёж в месяц, ₽</label></div>
+    </div>
+    <div id="debtCardFields" style="display:none">
+      <div class="row">
+        <div class="field"><input id="dLimit" type="text" inputmode="decimal" placeholder=" " oninput="sanitizeAmt(this)"><label for="dLimit">Лимит карты, ₽</label></div>
+        <div class="field"><input id="dUsed" type="text" inputmode="decimal" placeholder=" " oninput="sanitizeAmt(this)"><label for="dUsed">Долг сейчас, ₽</label></div>
+      </div>
+      <div class="field"><input id="dCardMonthly" type="text" inputmode="decimal" placeholder=" " oninput="sanitizeAmt(this)"><label for="dCardMonthly">Закрываю в месяц, ₽ (для нагрузки)</label></div>
+    </div>
     <div style="font-size:12px;color:var(--md-sys-color-on-surface-variant);margin-top:14px">Иконка</div>
     <div class="emoji-pick" id="dEmoji"></div>
     <div class="actions">
       <button class="btn text" onclick="closeScrim('debtScrim')">Отмена</button>
       <button class="btn filled" onclick="saveDebt()">Сохранить</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===================== CARD SPEND DIALOG ===================== -->
+<div class="scrim" id="cardSpendScrim">
+  <div class="dialog">
+    <h3>Трата с кредитки</h3>
+    <div class="desc" id="csDesc"></div>
+    <div class="segmented">
+      <button id="csModeBuy" class="sel" onclick="setCardSpendMode('buy')">
+        <svg class="check icon sm" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>Покупка
+      </button>
+      <button id="csModeInterest" onclick="setCardSpendMode('interest')">
+        <svg class="check icon sm" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>Проценты банка
+      </button>
+    </div>
+    <div class="row">
+      <div class="field"><input id="csAmount" class="has-calc" type="text" inputmode="decimal" placeholder=" " oninput="sanitizeAmt(this)"><label for="csAmount">Сумма, ₽</label>
+        <button type="button" class="icon-btn xs calc-trigger" onclick="openCalc('csAmount')" title="Калькулятор" aria-label="Калькулятор">
+          <svg class="icon sm" viewBox="0 0 24 24"><rect x="4" y="2" width="16" height="20" rx="2"/><line x1="8" y1="6" x2="16" y2="6"/>
+            <circle cx="8" cy="10" r="1" fill="currentColor" stroke="none"/><circle cx="12" cy="10" r="1" fill="currentColor" stroke="none"/><circle cx="16" cy="10" r="1" fill="currentColor" stroke="none"/>
+            <circle cx="8" cy="14" r="1" fill="currentColor" stroke="none"/><circle cx="12" cy="14" r="1" fill="currentColor" stroke="none"/><circle cx="16" cy="14" r="1" fill="currentColor" stroke="none"/>
+            <circle cx="8" cy="18" r="1" fill="currentColor" stroke="none"/><circle cx="12" cy="18" r="1" fill="currentColor" stroke="none"/><circle cx="16" cy="18" r="1" fill="currentColor" stroke="none"/></svg>
+        </button>
+      </div>
+      <div class="field filled" id="csCatField">
+        <select id="csCategory"></select>
+        <svg class="chev icon sm" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"/></svg>
+        <label>Категория</label>
+      </div>
+    </div>
+    <div class="field"><input id="csNote" type="text" placeholder=" "><label for="csNote">Комментарий (необязательно)</label></div>
+    <div class="actions">
+      <button class="btn text" onclick="closeScrim('cardSpendScrim')">Отмена</button>
+      <button class="btn filled" onclick="saveCardSpend()">Добавить</button>
     </div>
   </div>
 </div>
@@ -367,6 +443,37 @@
       <button class="btn text danger" id="assetDelBtn" onclick="delAsset()" style="margin-right:auto">Удалить</button>
       <button class="btn text" onclick="closeScrim('assetScrim')">Отмена</button>
       <button class="btn filled" onclick="saveAsset()">Сохранить</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===================== PIGGY (ИНВЕСТКОПИЛКА) DIALOG ===================== -->
+<div class="scrim" id="piggyScrim">
+  <div class="dialog">
+    <h3>Инвесткопилка</h3>
+    <div class="desc">Округляет покупки со счёта вверх и откладывает разницу — как в банке. Траты с кредитки не округляются.</div>
+    <div class="segmented">
+      <button id="pgOff" class="sel" onclick="setPiggyEnabled(false)">
+        <svg class="check icon sm" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>Выключена
+      </button>
+      <button id="pgOn" onclick="setPiggyEnabled(true)">
+        <svg class="check icon sm" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>Включена
+      </button>
+    </div>
+    <div class="field filled">
+      <select id="pgMode">
+        <option value="smart">Умное округление (шаг зависит от суммы)</option>
+        <option value="10">До 10 ₽</option>
+        <option value="50">До 50 ₽</option>
+        <option value="100">До 100 ₽</option>
+      </select>
+      <svg class="chev icon sm" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"/></svg>
+      <label>Округление</label>
+    </div>
+    <div class="field"><input id="pgAmount" type="text" inputmode="decimal" placeholder=" " oninput="sanitizeAmt(this)"><label for="pgAmount">Накоплено сейчас, ₽</label></div>
+    <div class="actions">
+      <button class="btn text" onclick="closeScrim('piggyScrim')">Отмена</button>
+      <button class="btn filled" onclick="savePiggy()">Сохранить</button>
     </div>
   </div>
 </div>
@@ -447,18 +554,68 @@
       </button>
     </div>
     <div class="row">
-      <div class="field"><input id="txAmount" type="text" inputmode="decimal" placeholder=" " oninput="sanitizeAmt(this)"><label for="txAmount">Сумма, ₽</label></div>
+      <div class="field"><input id="txAmount" class="has-calc" type="text" inputmode="decimal" placeholder=" " oninput="sanitizeAmt(this)"><label for="txAmount">Сумма, ₽</label>
+        <button type="button" class="icon-btn xs calc-trigger" onclick="openCalc('txAmount')" title="Калькулятор" aria-label="Калькулятор">
+          <svg class="icon sm" viewBox="0 0 24 24"><rect x="4" y="2" width="16" height="20" rx="2"/><line x1="8" y1="6" x2="16" y2="6"/>
+            <circle cx="8" cy="10" r="1" fill="currentColor" stroke="none"/><circle cx="12" cy="10" r="1" fill="currentColor" stroke="none"/><circle cx="16" cy="10" r="1" fill="currentColor" stroke="none"/>
+            <circle cx="8" cy="14" r="1" fill="currentColor" stroke="none"/><circle cx="12" cy="14" r="1" fill="currentColor" stroke="none"/><circle cx="16" cy="14" r="1" fill="currentColor" stroke="none"/>
+            <circle cx="8" cy="18" r="1" fill="currentColor" stroke="none"/><circle cx="12" cy="18" r="1" fill="currentColor" stroke="none"/><circle cx="16" cy="18" r="1" fill="currentColor" stroke="none"/></svg>
+        </button>
+      </div>
       <div class="field filled">
-        <select id="txCategory"></select>
+        <select id="txCategory" onchange="updateTxEditRefundField()"></select>
         <svg class="chev icon sm" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"/></svg>
         <label>Категория</label>
       </div>
     </div>
-    <div class="field"><input id="txNote" type="text" placeholder=" "><label for="txNote">Комментарий (необязательно)</label></div>
+    <div class="field filled" id="txRefundForField" style="display:none">
+      <select id="txRefundFor"></select>
+      <svg class="chev icon sm" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"/></svg>
+      <label>За какой расход</label>
+    </div>
+    <div class="row">
+      <div class="field"><input id="txNote" type="text" placeholder=" "><label for="txNote">Комментарий (необязательно)</label></div>
+      <div class="field filled" style="flex:0 0 auto;width:170px">
+        <input id="txEditDate" type="date">
+        <label for="txEditDate">Дата</label>
+      </div>
+    </div>
     <div class="actions">
       <button class="btn text danger" onclick="delTxFromEdit()" style="margin-right:auto">Удалить</button>
       <button class="btn text" onclick="closeScrim('txScrim')">Отмена</button>
       <button class="btn filled" onclick="saveTxEdit()">Сохранить</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===================== CALCULATOR DIALOG ===================== -->
+<div class="scrim" id="calcScrim">
+  <div class="dialog calc-dialog">
+    <h3>Калькулятор</h3>
+    <div class="calc-display" id="calcDisplay">0</div>
+    <div class="calc-grid">
+      <button class="calc-btn calc-op" onclick="calcClear()">C</button>
+      <button class="calc-btn calc-op" onclick="calcBackspace()">⌫</button>
+      <button class="calc-btn calc-op" onclick="calcInput('÷')">÷</button>
+      <button class="calc-btn calc-op" onclick="calcInput('×')">×</button>
+      <button class="calc-btn" onclick="calcInput('7')">7</button>
+      <button class="calc-btn" onclick="calcInput('8')">8</button>
+      <button class="calc-btn" onclick="calcInput('9')">9</button>
+      <button class="calc-btn calc-op" onclick="calcInput('-')">−</button>
+      <button class="calc-btn" onclick="calcInput('4')">4</button>
+      <button class="calc-btn" onclick="calcInput('5')">5</button>
+      <button class="calc-btn" onclick="calcInput('6')">6</button>
+      <button class="calc-btn calc-op" onclick="calcInput('+')">+</button>
+      <button class="calc-btn" onclick="calcInput('1')">1</button>
+      <button class="calc-btn" onclick="calcInput('2')">2</button>
+      <button class="calc-btn" onclick="calcInput('3')">3</button>
+      <button class="calc-btn calc-eq" onclick="calcEquals()" style="grid-row:span 2">=</button>
+      <button class="calc-btn" onclick="calcInput('0')" style="grid-column:span 2">0</button>
+      <button class="calc-btn" onclick="calcInput('.')">.</button>
+    </div>
+    <div class="actions">
+      <button class="btn text" onclick="closeScrim('calcScrim')">Отмена</button>
+      <button class="btn filled" onclick="calcConfirm()">Использовать</button>
     </div>
   </div>
 </div>

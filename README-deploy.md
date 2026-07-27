@@ -1,5 +1,84 @@
 # Развёртывание «Мои финансы» на сервере Ubuntu 24.04
 
+## ⚡ Актуальный план деплоя (образ из Docker Hub, домен burninghouse.ru)
+
+Образ уже собран и запушен: `shadowkick/finance:latest` (публичный, `docker login` на
+сервере не нужен). Ниже — весь путь от чистого сервера до рабочего HTTPS. Выполняется
+**на сервере по SSH**, шаг за шагом, не всё разом — после шага 0 проверьте вывод, прежде
+чем продолжать.
+
+### Шаг 0. Проверить порты — САМОЕ ВАЖНОЕ, чтобы не задеть VPN
+
+```bash
+sudo ss -tulpn | grep -E ':80\b|:443\b|:8443\b'
+```
+
+Ожидается: **443/udp** занят Hysteria2 (это нормально, не трогаем), возможно **443/tcp**
+занят 3x-ui/Reality (тоже не трогаем — именно поэтому ниже используется порт **8443**,
+а не 443). Порты **80/tcp** и **8443/tcp** должны быть свободны (пусто в выводе grep для них).
+Если 8443 чем-то занят — остановитесь и напишите мне, подберём другой порт.
+
+### Шаг 1. Docker (если ещё не установлен)
+
+```bash
+curl -fsSL https://get.docker.com | sudo sh
+```
+
+### Шаг 2. Скачать и запустить контейнер
+
+```bash
+mkdir -p ~/finance && cd ~/finance
+curl -o docker-compose.yml https://raw.githubusercontent.com/ShdwKick/Finance/main/docker-compose.prod.yml
+# либо просто создайте docker-compose.yml вручную с содержимым файла docker-compose.prod.yml из репозитория
+
+sudo docker compose pull
+sudo docker compose up -d
+sudo docker compose logs -f finance   # Ctrl+C для выхода, контейнер продолжит работать
+curl -s http://127.0.0.1:8787/api/health   # ожидаем {"ok":true}
+```
+
+### Шаг 3. Создать пользователя для входа в приложение
+
+```bash
+sudo docker exec finance node server.js adduser myname 'МойСильныйПароль'
+```
+
+### Шаг 4. DNS
+
+У регистратора `burninghouse.ru` добавьте **A-запись**: `money` → IP этого сервера
+(тот же IP, что у VPN — это нормально, разные порты). Дождитесь распространения:
+`ping money.burninghouse.ru`.
+
+### Шаг 5. Сертификат и nginx на порту 8443 (не 443!)
+
+```bash
+sudo apt install -y nginx certbot
+sudo certbot certonly --standalone -d money.burninghouse.ru
+# ^ на секунду займёт порт 80 для проверки домена, затем освободит. Порт 443 не трогает.
+
+sudo cp ~/finance/deploy/nginx-finance-8443.conf /etc/nginx/sites-available/finance
+sudo ln -s /etc/nginx/sites-available/finance /etc/nginx/sites-enabled/
+sudo nginx -t && sudo systemctl reload nginx
+sudo ufw allow 8443/tcp   # если включён firewall — остальные порты (443 udp/tcp) не трогаем
+```
+
+Готово: `https://money.burninghouse.ru:8443` должен открыть страницу входа.
+
+### Шаг 6. Подключить фронтенд на GitHub Pages
+
+На `https://burning-house.online` откройте форму входа → поле **«Адрес сервера»** →
+впишите `https://money.burninghouse.ru:8443` → войдите тем логином из шага 3.
+Адрес сохранится в браузере, вводить повторно не нужно.
+
+### Обновление образа в будущем
+
+Локально (на этой машине): `docker build -t shadowkick/finance:latest . && docker push shadowkick/finance:latest`.
+На сервере: `cd ~/finance && sudo docker compose pull && sudo docker compose up -d` — данные (volume) не тронет.
+
+---
+
+## Общая справка (все варианты деплоя, включая bare-metal и вариант без Docker)
+
 Приложение = один статический файл `index.html` + маленький сервер синхронизации
 `server.js` (чистый Node.js, **без npm install**, без внешних зависимостей).
 Данные всех устройств хранятся на сервере в `data/store.json`, вход по логину и паролю.

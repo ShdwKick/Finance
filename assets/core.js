@@ -5,7 +5,7 @@ const CATS={
     {n:"Продукты",e:"🛒"},{n:"Кафе и рестораны",e:"🍔"},{n:"Транспорт",e:"🚗"},
     {n:"Жильё и ЖКХ",e:"🏠"},{n:"Здоровье",e:"💊"},{n:"Одежда",e:"👕"},
     {n:"Развлечения",e:"🎮"},{n:"Связь и интернет",e:"📱"},{n:"Подписки",e:"📺"},
-    {n:"Образование",e:"📚"},{n:"Платёж по долгу",e:"🏦"},{n:"Другое",e:"💭"}
+    {n:"Образование",e:"📚"},{n:"Платёж по долгу",e:"🏦"},{n:"Проценты по кредиту",e:"💸"},{n:"Другое",e:"💭"}
   ],
   inc:[
     {n:"Зарплата",e:"💼"},{n:"Подработка",e:"🛠️"},{n:"Подарок",e:"🎁"},
@@ -40,7 +40,11 @@ function normalize(s){
   s=(s&&typeof s==="object")?s:{};
   s.tx=Array.isArray(s.tx)?s.tx:[];
   s.goals=Array.isArray(s.goals)?s.goals:[];
-  s.debts=Array.isArray(s.debts)?s.debts:[];
+  s.debts=(Array.isArray(s.debts)?s.debts:[]).map(d=>{
+    // кредитка: {kind:"card", limit, used}; обычный кредит kind не имеет (считается "loan")
+    if(d.kind==="card"){d.limit=Math.max(0,+d.limit||0);d.used=Math.max(0,+d.used||0);}
+    return d;
+  });
   s.fixed=(Array.isArray(s.fixed)?s.fixed:[]).map(f=>{
     // миграция: было одно число месяца (f.day), стало несколько (f.days[])
     if(!Array.isArray(f.days))f.days=f.day?[f.day]:[];
@@ -51,7 +55,11 @@ function normalize(s){
   s.theme=s.theme||"light";
   s.hideBalance=!!s.hideBalance;
   s.fixedSkips=Array.isArray(s.fixedSkips)?s.fixedSkips:[];
-  s.assets=Array.isArray(s.assets)?s.assets:[];
+  s.assets=(Array.isArray(s.assets)?s.assets:[]).map(a=>{delete a.piggyRound;return a;}); // копилка-флаг на активе упразднён — теперь отдельная сущность piggy
+  // инвесткопилка: постоянная сущность, по умолчанию выключена
+  s.piggy=(s.piggy&&typeof s.piggy==="object")
+    ?{enabled:!!s.piggy.enabled,mode:s.piggy.mode||"smart",amount:Math.max(0,+s.piggy.amount||0)}
+    :{enabled:false,mode:"smart",amount:0};
   return s;
 }
 function load(){

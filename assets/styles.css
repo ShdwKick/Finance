@@ -271,7 +271,8 @@
     appearance:none;-webkit-appearance:none;
   }
   .field select{cursor:pointer;padding-right:44px;color-scheme:light}
-  [data-theme="dark"] .field select{color-scheme:dark}
+  .field input[type="date"]{cursor:pointer;padding-right:12px;color-scheme:light;font-size:15px}
+  [data-theme="dark"] .field select,[data-theme="dark"] .field input[type="date"]{color-scheme:dark}
   .field select option{background:var(--md-sys-color-surface-container-high);color:var(--md-sys-color-on-surface)}
   .field .chev{position:absolute;right:14px;top:50%;transform:translateY(-50%);pointer-events:none;color:var(--md-sys-color-on-surface-variant)}
   .field input:focus,.field select:focus{outline:none;border:2px solid var(--md-sys-color-primary);padding:0 15px}
@@ -374,6 +375,17 @@
   .full-history-list{flex:1;overflow-y:auto;margin-top:8px;min-height:0}
   /* ниже базового z-index скримов — чтобы диалог редактирования, открытый ИЗ диалога «показать всё», был поверх него */
   #fullHistoryScrim,#fullGoalsScrim,#fullAssetsScrim,#fullFixedScrim{z-index:55}
+
+  /* ===================== КАЛЬКУЛЯТОР В ПОЛЕ СУММЫ ===================== */
+  .field input.has-calc{padding-right:44px}
+  .field .calc-trigger{position:absolute;right:2px;top:50%;transform:translateY(-50%)}
+  .calc-dialog{max-width:320px}
+  .calc-display{background:var(--md-sys-color-surface-container-highest);border-radius:var(--md-sys-shape-corner-m);padding:16px;font-size:26px;font-weight:600;text-align:right;overflow-x:auto;white-space:nowrap;margin-top:8px}
+  .calc-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:12px}
+  .calc-btn{height:52px;border-radius:var(--md-sys-shape-corner-m);border:0;background:var(--md-sys-color-surface-container-highest);color:var(--md-sys-color-on-surface);font-size:18px;font-weight:500;cursor:pointer;transition:filter .15s}
+  .calc-btn:active{filter:brightness(.9)}
+  .calc-btn.calc-op{background:var(--md-sys-color-secondary-container);color:var(--md-sys-color-on-secondary-container)}
+  .calc-btn.calc-eq{background:var(--md-sys-color-primary);color:var(--md-sys-color-on-primary)}
 
   /* ===================== ОГРАНИЧЕНИЕ ВЫСОТЫ СПИСКОВ (Цели/Активы/Обязательные) ===================== */
   #goalList{max-height:400px;overflow-y:auto}

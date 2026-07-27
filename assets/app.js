@@ -6,20 +6,243 @@ function setType(t){
   document.getElementById("segExp").classList.toggle("sel",t==="exp");
   document.getElementById("segInc").classList.toggle("sel",t==="inc");
   document.getElementById("category").innerHTML=CATS[t].map(c=>`<option value="${c.n}">${c.e}  ${c.n}</option>`).join("");
+  updateRefundField();
+  updatePaySourceField();
 }
 function catE(type,name){return (CATS[type].find(c=>c.n===name)||{e:"💭"}).e;}
+
+/* ---------- возврат, привязанный к конкретному расходу ---------- */
+/* "Возврат" среди доходов можно привязать к расходу (напр. оплатил один чек за всех, друзья
+   вернули свою часть отдельными переводами) — сумма привязанного расхода уменьшается в аналитике
+   на сумму возвратов, а сам возврат перестаёт учитываться как доход (см. netTxAmount) */
+function isRefundCat(type,cat){return type==="inc"&&cat==="Возврат";}
+function refundOptionsHtml(excludeId){
+  // погашение кредитки и пополнение копилки возвратом быть не могут — это переводы, а не расходы
+  const list=state.tx.filter(t=>t.type==="exp"&&!t.cardRepay&&!t.piggyId&&t.id!==excludeId).sort((a,b)=>new Date(b.date)-new Date(a.date)).slice(0,60);
+  return '<option value="">Без привязки к конкретному расходу</option>'+
+    list.map(t=>`<option value="${t.id}">${catE("exp",t.cat)} ${esc(t.note?t.note:t.cat)} — ${fmt(t.amount)} — ${fmtDate(t.date)}</option>`).join("");
+}
+function updateRefundField(){
+  const show=isRefundCat(curType,document.getElementById("category").value);
+  document.getElementById("refundForField").style.display=show?"":"none";
+  if(show)document.getElementById("refundFor").innerHTML=refundOptionsHtml();
+}
+function refundedAmount(expenseId){
+  return state.tx.filter(t=>t.type==="inc"&&t.refundFor===expenseId).reduce((s,t)=>s+t.amount,0);
+}
+/* сумма транзакции для аналитики/трендов: у расхода вычтены привязанные возвраты,
+   у привязанного возврата — ноль (он уже учтён через уменьшение расхода), у погашения
+   кредитки — тоже ноль (расход уже был учтён в момент покупки с карты, иначе задвоение). */
+function netTxAmount(t){
+  if(t.cardRepay||t.piggyId)return 0; // погашение кредитки и пополнение копилки — не расходы, а переводы
+  if(t.type==="exp")return Math.max(0,t.amount-refundedAmount(t.id));
+  if(t.type==="inc"&&t.refundFor)return 0;
+  return t.amount;
+}
+
+/* ---------- инвесткопилка: постоянная сущность state.piggy {enabled,mode,amount} ---------- */
+/* шаг округления: фиксированный или "умный" как в Т-банке — шаг растёт с суммой покупки */
+function piggyStep(amount,mode){
+  if(mode==="smart")return amount<100?10:amount<1000?50:100;
+  return +mode||0;
+}
+/* сколько докинуть в копилку, чтобы сумма покупки округлилась вверх до шага (0 — если уже круглая) */
+function piggyRoundUp(amount,mode){
+  const step=piggyStep(amount,mode);
+  if(!step)return 0;
+  return Math.round((Math.ceil(amount/step)*step-amount)*100)/100;
+}
+function piggyModeLabel(mode){return mode==="smart"?"умное округление":"округление до "+mode+" ₽";}
+let piggyDlgEnabled=false;
+function setPiggyEnabled(v){
+  piggyDlgEnabled=v;
+  document.getElementById("pgOff").classList.toggle("sel",!v);
+  document.getElementById("pgOn").classList.toggle("sel",v);
+}
+function openPiggy(){
+  setPiggyEnabled(state.piggy.enabled);
+  document.getElementById("pgMode").value=state.piggy.mode;
+  document.getElementById("pgAmount").value=state.piggy.amount||"";
+  openScrim("piggyScrim");
+}
+function savePiggy(){
+  let amount=parseAmount(document.getElementById("pgAmount").value);
+  if(isNaN(amount)||amount<0)amount=0;
+  state.piggy={enabled:piggyDlgEnabled,mode:document.getElementById("pgMode").value,amount};
+  save();closeScrim("piggyScrim");render();
+  snack(piggyDlgEnabled?"Копилка включена":"Копилка выключена");
+}
+/* строка копилки — всегда видна в панели активов, клик открывает настройки */
+function renderPiggy(){
+  const p=state.piggy;
+  document.getElementById("piggyBox").innerHTML=`<div class="mini-item" onclick="openPiggy()" title="Настроить копилку">
+    <div class="mi-row">
+      <div class="emoji">🐖</div>
+      <div class="body"><b>Инвесткопилка</b><span>${p.enabled?esc(piggyModeLabel(p.mode)):"выключена · нажмите, чтобы настроить"}</span></div>
+      <div class="amt">${p.enabled||p.amount>0?fmt(p.amount):""}</div>
+    </div>
+  </div>`;
+}
+/* месячный платёж долга для нагрузки: кредитка учитывается, только пока по ней есть долг */
+function debtMonthly(d){
+  if(d.kind==="card")return d.used>0?(d.monthly||0):0;
+  return d.monthly||0;
+}
+/* движение живых денег по операции — для баланса/спарклайна/runway. Трата с кредитки
+   (t.cardId) деньги со счёта не уводит — растёт долг карты, поэтому 0. Погашение кредитки
+   (t.cardRepay) — обычный минус со счёта, хоть в аналитике расходов и не участвует. */
+function cashTxAmount(t){
+  if(t.cardId)return 0;
+  return t.type==="inc"?t.amount:-t.amount;
+}
+/* текущая задолженность по элементу долгов: у кредитки — used, у кредита — remaining */
+function debtOwed(d){return d.kind==="card"?d.used:d.remaining;}
+function findCard(id){return state.debts.find(d=>d.id===id&&d.kind==="card");}
+
+/* ---------- калькулятор для полей суммы ---------- */
+let calcExpr="",calcTarget=null;
+function openCalc(targetId){
+  calcTarget=targetId;
+  const cur=parseAmount(document.getElementById(targetId).value);
+  calcExpr=(!isNaN(cur)&&cur>0)?String(cur):"";
+  calcRenderDisplay();
+  openScrim("calcScrim");
+}
+function calcRenderDisplay(){
+  document.getElementById("calcDisplay").textContent=calcExpr||"0";
+}
+function calcInput(ch){
+  const isOp=ch==="+"||ch==="-"||ch==="×"||ch==="÷";
+  if(isOp){
+    if(!calcExpr)return; // выражение не может начинаться с оператора
+    if(/[+\-×÷]$/.test(calcExpr))calcExpr=calcExpr.slice(0,-1)+ch; // заменить, а не задвоить оператор
+    else calcExpr+=ch;
+  }else if(ch==="."){
+    const lastNum=calcExpr.split(/[+\-×÷]/).pop();
+    if(!lastNum.includes("."))calcExpr+=(lastNum?"":"0")+".";
+  }else{
+    calcExpr+=ch;
+  }
+  calcRenderDisplay();
+}
+function calcClear(){calcExpr="";calcRenderDisplay();}
+function calcBackspace(){calcExpr=calcExpr.slice(0,-1);calcRenderDisplay();}
+/* безопасный разбор простого выражения (+ - × ÷, обычный приоритет умножения/деления), без eval() */
+function evalCalcExpr(expr){
+  if(!expr)return NaN;
+  const tokens=expr.match(/(\d+\.?\d*|\.\d+)|[+\-×÷]/g);
+  if(!tokens||isNaN(parseFloat(tokens[0])))return NaN;
+  const vals=[parseFloat(tokens[0])],ops=[];
+  for(let i=1;i<tokens.length;i+=2){
+    const op=tokens[i],num=parseFloat(tokens[i+1]);
+    if(isNaN(num))return NaN;
+    if(op==="×"||op==="÷")vals.push(op==="×"?vals.pop()*num:vals.pop()/num);
+    else{ops.push(op);vals.push(num);}
+  }
+  let result=vals[0];
+  for(let i=0;i<ops.length;i++)result=ops[i]==="+"?result+vals[i+1]:result-vals[i+1];
+  return result;
+}
+function calcEquals(){
+  const r=evalCalcExpr(calcExpr);
+  if(isNaN(r)||!isFinite(r))return snack("Проверьте выражение");
+  calcExpr=String(Math.round(r*100)/100);
+  calcRenderDisplay();
+}
+function calcConfirm(){
+  let r=evalCalcExpr(calcExpr);
+  if(isNaN(r)||!isFinite(r))return snack("Проверьте выражение");
+  if(r<0){snack("Результат отрицательный — использован 0");r=0;}
+  r=Math.round(r*100)/100;
+  const el=document.getElementById(calcTarget);
+  el.value=String(r);
+  el.dispatchEvent(new Event("input",{bubbles:true}));
+  closeScrim("calcScrim");
+  el.focus();
+}
+
+/* селектор «Оплата» в форме нового расхода: со счёта (по умолчанию) или с одной из кредиток.
+   Выбор сохраняется между добавлениями — snack каждый раз явно говорит, куда записано */
+function updatePaySourceField(){
+  const box=document.getElementById("paySourceField");
+  const cards=state.debts.filter(d=>d.kind==="card");
+  const show=curType==="exp"&&cards.length>0;
+  box.style.display=show?"":"none";
+  if(!show)return;
+  const sel=document.getElementById("paySource");
+  const cur=sel.value;
+  sel.innerHTML='<option value="">Со счёта</option>'+cards.map(d=>`<option value="${d.id}">💳 ${esc(d.name)}</option>`).join("");
+  if([...sel.options].some(o=>o.value===cur))sel.value=cur;
+}
+
+/* ---------- дата операции ---------- */
+/* ISO ↔ значение <input type="date"> (yyyy-mm-dd) в ЛОКАЛЬНОЙ зоне: toISOString() даёт UTC
+   и без поправки на смещение дата может съехать на сутки */
+function dateToInput(iso){
+  const d=new Date(iso);
+  return new Date(d.getTime()-d.getTimezoneOffset()*60000).toISOString().slice(0,10);
+}
+function todayInput(){return dateToInput(new Date());}
+/* дата из поля → ISO. Сегодня — с текущим временем (чтобы операции одного дня шли по порядку
+   добавления), прошлые дни — полдень: подальше от границ суток, чтобы не прыгало по зонам */
+function dateFromInput(v){
+  if(!v)return new Date().toISOString();
+  if(v===todayInput())return new Date().toISOString();
+  return new Date(v+"T12:00:00").toISOString();
+}
+/* весь код (история, спарклайн, «за месяц») ждёт tx отсортированными: новые первыми.
+   Операция задним числом нарушает этот порядок, поэтому сортируем при каждом рендере */
+function sortTx(){state.tx.sort((a,b)=>new Date(b.date)-new Date(a.date));}
 
 /* ---------- transactions ---------- */
 function addTx(){
   const el=document.getElementById("amount");
   const amount=parseAmount(el.value);
   if(!amount||amount<=0){snack("Введите сумму больше нуля");el.focus();return;}
-  state.tx.unshift({id:uid(),type:curType,amount,cat:document.getElementById("category").value,note:document.getElementById("note").value.trim(),date:new Date().toISOString()});
+  const cat=document.getElementById("category").value;
+  const refundFor=isRefundCat(curType,cat)?(document.getElementById("refundFor").value||null):null;
+  const payCard=curType==="exp"?findCard(document.getElementById("paySource").value):null;
+  const dateInput=document.getElementById("txDate");
+  const date=dateFromInput(dateInput.value);
+  const tx={id:uid(),type:curType,amount,cat,note:document.getElementById("note").value.trim(),date,refundFor};
+  if(payCard){tx.cardId=payCard.id;payCard.used+=amount;}
+  state.tx.unshift(tx);
+  // округление в копилку — только для расходов со счёта (с кредитки — деньги банка, банк их не округляет в копилку)
+  let piggyMsg="";
+  if(curType==="exp"&&!payCard&&state.piggy.enabled){
+    const add=piggyRoundUp(amount,state.piggy.mode);
+    if(add>0){
+      state.piggy.amount=Math.round((state.piggy.amount+add)*100)/100;
+      state.tx.unshift({id:uid(),type:"exp",amount:add,cat:"Другое",note:"Округление · Инвесткопилка",date,piggyId:"piggy"});
+      piggyMsg=" · "+fmt(add)+" в копилку";
+    }
+  }
+  sortTx();
   save();
   el.value="";document.getElementById("note").value="";
-  render();snack(curType==="inc"?"Доход добавлен":"Расход добавлен");el.focus();
+  updateRefundField();
+  render();
+  // дату НЕ сбрасываем — удобно вносить пачку операций за один прошлый день; но раз она «залипает»,
+  // явно проговариваем её в снэке, чтобы случайно не записать сегодняшнюю трату задним числом
+  const backdated=dateInput.value&&dateInput.value!==todayInput()
+    ?" · "+new Date(date).toLocaleDateString("ru-RU",{day:"numeric",month:"short"}):"";
+  snack((curType==="inc"?"Доход добавлен"
+    :payCard?(payCard.used>payCard.limit?"Записано на кредитку — лимит превышен!":"Расход с кредитки добавлен")
+    :"Расход добавлен")+backdated+piggyMsg);
+  el.focus();
 }
-function delTx(id){state.tx=state.tx.filter(t=>t.id!==id);save();render();}
+function delTx(id){
+  state.tx.forEach(t=>{if(t.type==="inc"&&t.refundFor===id)t.refundFor=null;});
+  // операции, связанные с кредиткой или копилкой, при удалении откатывают их суммы, чтобы не разъехались цифры
+  const doomed=state.tx.find(t=>t.id===id);
+  if(doomed){
+    const card=doomed.cardId?findCard(doomed.cardId):doomed.cardRepay?findCard(doomed.cardRepay):null;
+    if(card)card.used=Math.max(0,card.used+(doomed.cardId?-doomed.amount:doomed.amount));
+    if(doomed.piggyId)state.piggy.amount=Math.max(0,Math.round((state.piggy.amount-doomed.amount)*100)/100);
+  }
+  state.tx=state.tx.filter(t=>t.id!==id);
+  save();render();
+}
 
 function fmtDate(iso){
   const d=new Date(iso),now=new Date();
@@ -32,16 +255,19 @@ function fmtDate(iso){
 
 /* ---------- render ---------- */
 function render(){
+  sortTx(); // страховка: порядок могли нарушить импорт бэкапа или синхронизация с сервером
   const inc=state.tx.filter(t=>t.type==="inc").reduce((s,t)=>s+t.amount,0);
-  const exp=state.tx.filter(t=>t.type==="exp").reduce((s,t)=>s+t.amount,0);
-  const balance=inc-exp;
+  // в headline-карточке «Расходы» покупка с кредитки — расход, а переводы (погашение кредитки,
+  // пополнение копилки) — нет: это не траты, а перекладывание своих денег / уже учтённый расход
+  const exp=state.tx.filter(t=>t.type==="exp"&&!t.cardRepay&&!t.piggyId).reduce((s,t)=>s+t.amount,0);
+  const balance=state.tx.reduce((s,t)=>s+cashTxAmount(t),0);
 
   const series=monthlySeries(6);
   const cur=series[series.length-1],prev=series[series.length-2];
   const now=new Date();
   const monthStart=new Date(now.getFullYear(),now.getMonth(),1);
   const balBeforeThisMonth=state.tx.filter(t=>new Date(t.date)<monthStart)
-    .reduce((s,t)=>s+(t.type==="inc"?t.amount:-t.amount),0);
+    .reduce((s,t)=>s+cashTxAmount(t),0);
 
   if(state.hideBalance){
     document.getElementById("balance").dataset.v=balance;
@@ -52,8 +278,8 @@ function render(){
     setDelta("balanceDelta",pctDelta(balance,balBeforeThisMonth),null,balance-balBeforeThisMonth);
   }
   const nwLine=document.getElementById("netWorthLine");
-  if(state.assets.length||state.debts.length){
-    const nw=balance+state.assets.reduce((s,a)=>s+a.amount,0)-state.debts.reduce((s,d)=>s+d.remaining,0);
+  if(state.assets.length||state.debts.length||state.piggy.amount>0){
+    const nw=balance+state.assets.reduce((s,a)=>s+a.amount,0)+state.piggy.amount-state.debts.reduce((s,d)=>s+debtOwed(d),0);
     nwLine.textContent="Чистая стоимость (с активами и долгами): "+(state.hideBalance?"• • • • •":fmt(nw));
   }else{
     nwLine.textContent="";
@@ -62,13 +288,14 @@ function render(){
   setDelta("incomeDelta",pctDelta(cur.inc,prev.inc),null,cur.inc-prev.inc);
   setDelta("expenseDelta",pctDelta(cur.exp,prev.exp),null,cur.exp-prev.exp,true);
 
-  const debtRemain=state.debts.reduce((s,d)=>s+d.remaining,0);
+  const debtRemain=state.debts.reduce((s,d)=>s+debtOwed(d),0);
   animateNum("debtTotal",debtRemain);
   document.getElementById("debtSub").textContent=state.debts.length?state.debts.length+" активных":"нет активных долгов";
 
   renderTxList();
   renderSpark();
   renderGoals();renderAssets();renderFixed();renderDebts();renderCats();renderCatChanges();renderDynamics();
+  updatePaySourceField(); // список кредиток в форме расхода мог измениться
   // держим открытые диалоги «показать всё» актуальными после правок, сделанных прямо из них
   refreshIfOpen("fullHistoryScrim",openFullHistory);
   refreshIfOpen("fullGoalsScrim",openFullGoals);
@@ -105,9 +332,20 @@ function filteredTx(){
   return{rows,hasFilters};
 }
 function txRowHtml(t,i){
+  let sub=`${esc(t.cat)} · ${fmtDate(t.date)}`;
+  if(t.type==="exp"){
+    const r=refundedAmount(t.id);
+    if(r>0)sub+=` · возвращено ${fmt(r)}`;
+    const card=t.cardId?findCard(t.cardId):t.cardRepay?findCard(t.cardRepay):null;
+    if(card)sub+=` · 💳 ${esc(card.name)}`;
+    if(t.piggyId)sub+=" · 🐖 Инвесткопилка";
+  }else if(t.refundFor){
+    const linked=state.tx.find(x=>x.id===t.refundFor);
+    if(linked)sub=`Возврат за «${esc(linked.note||linked.cat)}» · ${fmtDate(t.date)}`;
+  }
   return `<div class="list-item" style="animation-delay:${Math.min(i*.03,.5)}s" onclick="openTxEdit('${t.id}')" title="Изменить">
     <div class="avatar ${t.type}">${catE(t.type,t.cat)}</div>
-    <div class="body"><b>${t.note?esc(t.note):esc(t.cat)}</b><span>${esc(t.cat)} · ${fmtDate(t.date)}</span></div>
+    <div class="body"><b>${t.note?esc(t.note):esc(t.cat)}</b><span>${sub}</span></div>
     <div class="trail ${t.type}">${t.type==="inc"?"+":"−"}${fmt(t.amount)}</div>
     <button class="icon-btn del" onclick="event.stopPropagation();delTx('${t.id}')" title="Удалить" aria-label="Удалить">
       <svg class="icon sm" viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
@@ -172,6 +410,15 @@ function setTxEditType(t){
   document.getElementById("txSegExp").classList.toggle("sel",t==="exp");
   document.getElementById("txSegInc").classList.toggle("sel",t==="inc");
   document.getElementById("txCategory").innerHTML=CATS[t].map(c=>`<option value="${c.n}">${c.e}  ${c.n}</option>`).join("");
+  updateTxEditRefundField();
+}
+function updateTxEditRefundField(keepVal){
+  const show=isRefundCat(txEditType,document.getElementById("txCategory").value);
+  document.getElementById("txRefundForField").style.display=show?"":"none";
+  if(show){
+    document.getElementById("txRefundFor").innerHTML=refundOptionsHtml(editTxId);
+    if(keepVal)document.getElementById("txRefundFor").value=keepVal;
+  }
 }
 function openTxEdit(id){
   const t=state.tx.find(x=>x.id===id);if(!t)return;
@@ -180,15 +427,27 @@ function openTxEdit(id){
   document.getElementById("txAmount").value=t.amount;
   document.getElementById("txCategory").value=t.cat;
   document.getElementById("txNote").value=t.note||"";
+  document.getElementById("txEditDate").value=dateToInput(t.date);
+  updateTxEditRefundField(t.refundFor);
   openScrim("txScrim");setTimeout(()=>document.getElementById("txAmount").focus(),90);
 }
 function saveTxEdit(){
   const t=state.tx.find(x=>x.id===editTxId);if(!t)return;
   const amount=parseAmount(document.getElementById("txAmount").value);
   if(!amount||amount<=0)return snack("Введите сумму больше нуля");
-  t.type=txEditType;t.amount=amount;
-  t.cat=document.getElementById("txCategory").value;
+  if((t.cardId||t.cardRepay||t.piggyId)&&txEditType!=="exp")return snack("Операция связана с кредиткой или копилкой — тип должен остаться «Расход»");
+  // правка суммы карточной/копилочной операции двигает и связанную сумму, чтобы цифры не разъехались
+  const card=t.cardId?findCard(t.cardId):t.cardRepay?findCard(t.cardRepay):null;
+  if(card&&amount!==t.amount)card.used=Math.max(0,card.used+(t.cardId?amount-t.amount:t.amount-amount));
+  if(t.piggyId&&amount!==t.amount)state.piggy.amount=Math.max(0,Math.round((state.piggy.amount+amount-t.amount)*100)/100);
+  const cat=document.getElementById("txCategory").value;
+  t.type=txEditType;t.amount=amount;t.cat=cat;
+  t.refundFor=isRefundCat(txEditType,cat)?(document.getElementById("txRefundFor").value||null):null;
   t.note=document.getElementById("txNote").value.trim();
+  const newDate=document.getElementById("txEditDate").value;
+  // время трогаем только если день реально сменился — иначе правка суммы сбрасывала бы порядок внутри дня
+  if(newDate&&newDate!==dateToInput(t.date))t.date=dateFromInput(newDate);
+  sortTx();
   save();closeScrim("txScrim");render();snack("Операция обновлена");
 }
 function delTxFromEdit(){
@@ -217,7 +476,7 @@ function renderSpark(){
   if(txs.length<2){svg.style.display="none";wrap.onmousemove=wrap.onmouseleave=wrap.ontouchmove=wrap.ontouchend=null;sparkPts=[];return;}
   svg.style.display="block";
   let bal=0;const vals=[0],dates=[null];
-  txs.forEach(t=>{bal+=t.type==="inc"?t.amount:-t.amount;vals.push(bal);dates.push(t.date);});
+  txs.forEach(t=>{bal+=cashTxAmount(t);vals.push(bal);dates.push(t.date);});
   const min=Math.min(...vals),max=Math.max(...vals),range=(max-min)||1,step=SPARK_W/(vals.length-1);
   sparkPts=vals.map((v,i)=>({x:i*step,y:SPARK_H-((v-min)/range)*(SPARK_H-10)-5,val:v,date:dates[i]}));
   const line=sparkPts.map((p,i)=>(i?"L":"M")+p.x.toFixed(1)+" "+p.y.toFixed(1)).join(" ");
@@ -351,14 +610,17 @@ function assetRowHtml(a){
 function renderAssets(){
   const sumBox=document.getElementById("assetSumline"),box=document.getElementById("assetItemsScroll");
   if(!sumBox||!box)return;
+  renderPiggy(); // строка копилки видна всегда, независимо от наличия активов
   if(!state.assets.length){
-    sumBox.innerHTML="";
+    // итог показываем, если в копилке что-то лежит — она тоже актив
+    sumBox.innerHTML=state.piggy.amount>0
+      ?`<div class="sumline"><span>Итого активов</span><span class="sv">${fmt(state.piggy.amount)}</span></div>`:"";
     box.innerHTML=empty("Добавьте сбережения, вклады, инвестиции — всё, что не проходит через операции.","M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20z M12 6v6l4 2");
     return;
   }
   const{rows}=filteredAssets();
-  // итог считаем по ВСЕМ активам (не по отфильтрованным) — чтобы совпадало с net worth
-  const total=state.assets.reduce((s,a)=>s+a.amount,0);
+  // итог считаем по ВСЕМ активам (не по отфильтрованным) + копилка — чтобы совпадало с net worth
+  const total=state.assets.reduce((s,a)=>s+a.amount,0)+state.piggy.amount;
   sumBox.innerHTML=`<div class="sumline"><span>Итого активов</span><span class="sv">${fmt(total)}</span></div>`;
   box.innerHTML=rows.length?rows.map(assetRowHtml).join(""):empty("Ничего не найдено по этим фильтрам","M11 3a8 8 0 1 0 0 16 8 8 0 0 0 0-16z M21 21l-4.3-4.3");
 }
@@ -558,8 +820,8 @@ function scheduleAssetPriceRefresh(){
 /* ---------- debts ---------- */
 function computePdn(){
   const now=new Date();
-  const monthlyPay=state.debts.reduce((s,d)=>s+(d.monthly||0),0);
-  const monthInc=state.tx.filter(t=>t.type==="inc"&&sameMonth(t.date,now)).reduce((s,t)=>s+t.amount,0);
+  const monthlyPay=state.debts.reduce((s,d)=>s+debtMonthly(d),0);
+  const monthInc=state.tx.filter(t=>t.type==="inc"&&sameMonth(t.date,now)).reduce((s,t)=>s+netTxAmount(t),0);
   const basis=state.monthlyIncome||monthInc;
   const pdn=basis>0?monthlyPay/basis*100:null;
   let verdict,vcol;
@@ -600,8 +862,28 @@ function renderDebts(){
   </div>`;
 
   const box=document.getElementById("debtList");
-  if(!state.debts.length){box.innerHTML=empty("Долгов нет. Если есть кредит или рассрочка — добавьте, чтобы видеть нагрузку.","M4 4v16h16 M4 14l4-4 4 3 6-7");return;}
+  if(!state.debts.length){box.innerHTML=empty("Долгов нет. Если есть кредит, рассрочка или кредитка — добавьте, чтобы видеть нагрузку.","M4 4v16h16 M4 14l4-4 4 3 6-7");return;}
   box.innerHTML=state.debts.map(d=>{
+    if(d.kind==="card"){
+      // у кредитки прогресс — использование лимита (чем больше, тем хуже), не «сколько погашено»
+      const usedPct=d.limit>0?Math.min(100,Math.round(d.used/d.limit*100)):0;
+      const avail=Math.max(0,d.limit-d.used);
+      const over=d.used>d.limit;
+      const barCol=over||usedPct>=80?"var(--md-sys-color-error)":usedPct>=50?"var(--md-warn)":"";
+      return `<div class="tile">
+        <div class="top"><div class="emoji">${d.emoji}</div>
+          <div><div class="tname">${esc(d.name)}</div>
+          <div class="tsub">${over?"превышен лимит! долг "+fmt(d.used)+" из "+fmt(d.limit):"долг "+fmt(d.used)+" из "+fmt(d.limit)+" · доступно "+fmt(avail)}${d.monthly>0&&d.used>0?" · плачу "+fmt(d.monthly)+"/мес":""}</div></div>
+          <div class="pct" ${over?'style="color:var(--md-sys-color-error)"':""}>${usedPct}%</div></div>
+        <div class="linear"><i data-w="${usedPct}"${barCol?` style="background:${barCol}"`:""}></i></div>
+        <div class="acts">
+          <button class="btn tonal" onclick="openCardSpend('${d.id}')">Потратить</button>
+          <button class="btn text" onclick="openAmt('cardRepay','${d.id}')" ${d.used<=0?"disabled style=opacity:.5":""}>Погасить</button>
+          <button class="btn text" onclick="openDebt('${d.id}')">Изменить</button>
+          <button class="btn text danger" onclick="delDebt('${d.id}')" style="flex:0 0 44px;padding:0">
+            <svg class="icon sm" viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg></button>
+        </div></div>`;
+    }
     const paidPct=d.total>0?Math.min(100,Math.round((d.total-d.remaining)/d.total*100)):0;
     const done=d.remaining<=0;
     return `<div class="tile ${done?"done":""}">
@@ -624,29 +906,55 @@ function setIncome(v){
   save();
   updatePdn(); // патчим показатели; поле дохода не пересоздаётся → каретка остаётся на месте
 }
+let debtKind="loan";
+function setDebtKind(k){
+  debtKind=k;
+  document.getElementById("dKindLoan").classList.toggle("sel",k==="loan");
+  document.getElementById("dKindCard").classList.toggle("sel",k==="card");
+  document.getElementById("debtLoanFields").style.display=k==="loan"?"":"none";
+  document.getElementById("debtCardFields").style.display=k==="card"?"":"none";
+}
 function openDebt(id){
   editId=id||null;const d=id?state.debts.find(x=>x.id===id):null;
-  document.getElementById("debtTitle").textContent=d?"Изменить долг":"Новый долг";
+  setDebtKind(d&&d.kind==="card"?"card":"loan");
+  document.getElementById("debtTitle").textContent=d?(d.kind==="card"?"Изменить кредитку":"Изменить долг"):"Новый долг";
   document.getElementById("dName").value=d?d.name:"";
-  document.getElementById("dTotal").value=d?d.total:"";
-  document.getElementById("dRemain").value=d?d.remaining:"";
-  document.getElementById("dMonthly").value=d?(d.monthly||""):"";
-  selEmoji=d?d.emoji:"🏦";
+  document.getElementById("dTotal").value=d&&d.kind!=="card"?d.total:"";
+  document.getElementById("dRemain").value=d&&d.kind!=="card"?d.remaining:"";
+  document.getElementById("dMonthly").value=d&&d.kind!=="card"?(d.monthly||""):"";
+  document.getElementById("dLimit").value=d&&d.kind==="card"?d.limit:"";
+  document.getElementById("dUsed").value=d&&d.kind==="card"?d.used:"";
+  document.getElementById("dCardMonthly").value=d&&d.kind==="card"?(d.monthly||""):"";
+  selEmoji=d?d.emoji:(debtKind==="card"?"💳":"🏦");
   renderEmojis("dEmoji",DEBT_EMOJIS);
   openScrim("debtScrim");setTimeout(()=>document.getElementById("dName").focus(),90);
 }
 function saveDebt(){
   const name=document.getElementById("dName").value.trim();
-  const total=parseAmount(document.getElementById("dTotal").value);
-  let remaining=parseAmount(document.getElementById("dRemain").value);
-  const monthly=Math.max(0,parseAmount(document.getElementById("dMonthly").value)||0);
   if(!name)return snack("Введите название долга");
-  if(!total||total<=0)return snack("Введите общую сумму долга");
-  if(isNaN(remaining))remaining=total;
-  remaining=Math.max(0,remaining);
-  if(editId)Object.assign(state.debts.find(x=>x.id===editId),{name,total,remaining,monthly,emoji:selEmoji});
-  else state.debts.push({id:uid(),name,total,remaining,monthly,emoji:selEmoji});
-  save();closeScrim("debtScrim");render();snack("Долг сохранён");
+  let data;
+  if(debtKind==="card"){
+    const limit=parseAmount(document.getElementById("dLimit").value);
+    let used=parseAmount(document.getElementById("dUsed").value);
+    const monthly=Math.max(0,parseAmount(document.getElementById("dCardMonthly").value)||0);
+    if(!limit||limit<=0)return snack("Введите лимит карты");
+    used=isNaN(used)?0:Math.max(0,used);
+    data={kind:"card",name,limit,used,monthly,emoji:selEmoji};
+  }else{
+    const total=parseAmount(document.getElementById("dTotal").value);
+    let remaining=parseAmount(document.getElementById("dRemain").value);
+    const monthly=Math.max(0,parseAmount(document.getElementById("dMonthly").value)||0);
+    if(!total||total<=0)return snack("Введите общую сумму долга");
+    if(isNaN(remaining))remaining=total;
+    data={name,total,remaining:Math.max(0,remaining),monthly,emoji:selEmoji};
+  }
+  if(editId){
+    const d=state.debts.find(x=>x.id===editId);
+    // при смене типа стираем поля другого типа, чтобы не остались «хвосты»
+    delete d.kind;delete d.limit;delete d.used;delete d.total;delete d.remaining;delete d.monthly;
+    Object.assign(d,data);
+  }else state.debts.push({id:uid(),...data});
+  save();closeScrim("debtScrim");render();snack(debtKind==="card"?"Кредитка сохранена":"Долг сохранён");
 }
 function delDebt(id){if(confirm("Удалить этот долг?")){state.debts=state.debts.filter(d=>d.id!==id);save();render();}}
 
@@ -658,6 +966,11 @@ function openAmt(mode,id){
     document.getElementById("amtTitle").textContent="Пополнить цель";
     document.getElementById("amtDesc").textContent=g.emoji+" "+g.name+" — "+fmt(g.saved)+" из "+fmt(g.target);
     document.getElementById("amtLabel").textContent="Сумма (можно −, чтобы снять)";
+  }else if(mode==="cardRepay"){
+    const d=state.debts.find(x=>x.id===id);
+    document.getElementById("amtTitle").textContent="Погасить кредитку";
+    document.getElementById("amtDesc").textContent=d.emoji+" "+d.name+" — долг "+fmt(d.used);
+    document.getElementById("amtLabel").textContent="Сумма погашения, ₽";
   }else{
     const d=state.debts.find(x=>x.id===id);
     document.getElementById("amtTitle").textContent="Внести платёж";
@@ -674,11 +987,53 @@ function confirmAmt(){
     const g=state.goals.find(x=>x.id===amtId);const was=g.saved>=g.target;
     g.saved=Math.max(0,g.saved+v);save();closeScrim("amtScrim");render();
     if(!was&&g.saved>=g.target){celebrate();snack("Цель достигнута! 🎉");}else snack(v>0?"Цель пополнена":"Сумма снята");
+  }else if(amtMode==="cardRepay"){
+    const d=state.debts.find(x=>x.id===amtId);
+    const pay=Math.abs(v);
+    d.used=Math.max(0,d.used-pay);
+    // погашение — реальный уход денег со счёта (cashTxAmount), но НЕ расход в аналитике (netTxAmount=0):
+    // расход уже был учтён в момент покупки с карты
+    state.tx.unshift({id:uid(),type:"exp",amount:pay,cat:"Платёж по долгу",note:"Погашение · "+d.name,date:new Date().toISOString(),cardRepay:d.id});
+    save();closeScrim("amtScrim");render();
+    if(d.used<=0){celebrate();snack("Кредитка погашена! 🎉");}else snack("Погашение внесено");
   }else{
     const d=state.debts.find(x=>x.id===amtId);const was=d.remaining<=0;
     d.remaining=Math.max(0,d.remaining-Math.abs(v));save();closeScrim("amtScrim");render();
     if(!was&&d.remaining<=0){celebrate();snack("Долг погашен! 🎉");}else snack("Платёж внесён");
   }
+}
+
+/* ---------- траты с кредитки (покупка / проценты банка) ---------- */
+let cardSpendId=null,cardSpendMode="buy";
+function setCardSpendMode(m){
+  cardSpendMode=m;
+  document.getElementById("csModeBuy").classList.toggle("sel",m==="buy");
+  document.getElementById("csModeInterest").classList.toggle("sel",m==="interest");
+  // у процентов банка категория фиксированная, селектор не нужен
+  document.getElementById("csCatField").style.display=m==="buy"?"":"none";
+}
+function openCardSpend(id){
+  const d=findCard(id);if(!d)return;
+  cardSpendId=id;
+  setCardSpendMode("buy");
+  document.getElementById("csDesc").textContent=d.emoji+" "+d.name+" — доступно "+fmt(Math.max(0,d.limit-d.used));
+  document.getElementById("csCategory").innerHTML=CATS.exp.map(c=>`<option value="${c.n}">${c.e}  ${c.n}</option>`).join("");
+  document.getElementById("csAmount").value="";
+  document.getElementById("csNote").value="";
+  openScrim("cardSpendScrim");setTimeout(()=>document.getElementById("csAmount").focus(),90);
+}
+function saveCardSpend(){
+  const d=findCard(cardSpendId);if(!d)return;
+  const amount=parseAmount(document.getElementById("csAmount").value);
+  if(!amount||amount<=0)return snack("Введите сумму больше нуля");
+  const interest=cardSpendMode==="interest";
+  const cat=interest?"Проценты по кредиту":document.getElementById("csCategory").value;
+  const note=document.getElementById("csNote").value.trim()||(interest?"Проценты · "+d.name:"");
+  d.used+=amount;
+  // расход учитывается в аналитике сразу (netTxAmount), но живые деньги не двигает (cashTxAmount=0)
+  state.tx.unshift({id:uid(),type:"exp",amount,cat,note,date:new Date().toISOString(),cardId:d.id});
+  save();closeScrim("cardSpendScrim");render();
+  snack(d.used>d.limit?"Добавлено. Внимание: лимит карты превышен!":(interest?"Проценты начислены":"Трата с кредитки добавлена"));
 }
 
 /* ---------- categories breakdown ---------- */
@@ -722,8 +1077,10 @@ function sumByCat(from,to){
   const by={};
   state.tx.forEach(t=>{
     if(t.type!=="exp")return;
+    const net=netTxAmount(t);
+    if(net<=0)return; // переводы (копилка/погашение) и полностью возвращённые расходы не создают пустых категорий
     const d=new Date(t.date);
-    if(d>=from&&d<to)by[t.cat]=(by[t.cat]||0)+t.amount;
+    if(d>=from&&d<to)by[t.cat]=(by[t.cat]||0)+net;
   });
   return by;
 }
@@ -865,7 +1222,7 @@ function delFixed(id){if(confirm("Удалить этот платёж?")){state
 
 /* сколько потрачено по категории в этом месяце (факт) */
 function monthCatSpent(cat,now){
-  return state.tx.filter(t=>t.type==="exp"&&t.cat===cat&&sameMonth(t.date,now)).reduce((s,t)=>s+t.amount,0);
+  return state.tx.filter(t=>t.type==="exp"&&t.cat===cat&&sameMonth(t.date,now)).reduce((s,t)=>s+netTxAmount(t),0);
 }
 
 /* карточка-детали обязательного платежа (по клику) */
@@ -968,7 +1325,7 @@ function renderDynamics(){
   const data=monthlySeries(6);
   const cur=data[5],prev=data[4];
   const basis=state.monthlyIncome||cur.inc;
-  const oblig=state.fixed.reduce((s,f)=>s+f.amount,0)+state.debts.reduce((s,d)=>s+(d.monthly||0),0);
+  const oblig=state.fixed.reduce((s,f)=>s+f.amount,0)+state.debts.reduce((s,d)=>s+debtMonthly(d),0);
   const free=basis-oblig;
   const savRate=basis>0?Math.round((basis-cur.exp)/basis*100):null;
   const dayN=now.getDate(),dim=new Date(now.getFullYear(),now.getMonth()+1,0).getDate();
@@ -977,9 +1334,9 @@ function renderDynamics(){
   const P="var(--md-sys-color-primary)",E="var(--md-sys-color-error)",W="var(--md-warn)";
 
   // «хватит денег на N дней»: текущий баланс / средний дневной расход за последние 30 дней
-  const balance=state.tx.reduce((s,t)=>s+(t.type==="inc"?t.amount:-t.amount),0);
+  const balance=state.tx.reduce((s,t)=>s+cashTxAmount(t),0);
   const from30=new Date(now.getTime()-30*86400000);
-  const exp30=state.tx.filter(t=>t.type==="exp"&&new Date(t.date)>=from30).reduce((s,t)=>s+t.amount,0);
+  const exp30=state.tx.filter(t=>t.type==="exp"&&new Date(t.date)>=from30).reduce((s,t)=>s+netTxAmount(t),0);
   const dailyRate=exp30/30;
   let runwayVal,runwayCol,runwayHint;
   if(balance<=0){runwayVal="0 дней";runwayCol=E;runwayHint="баланс уже в нуле или минусе";}
@@ -1059,7 +1416,7 @@ function monthlySeries(n){
     state.tx.forEach(t=>{
       const d=new Date(t.date);
       if(d.getFullYear()===md.getFullYear()&&d.getMonth()===md.getMonth()){
-        if(t.type==="inc")inc+=t.amount;else exp+=t.amount;
+        if(t.type==="inc")inc+=netTxAmount(t);else exp+=netTxAmount(t);
       }
     });
     arr.push({md,inc,exp});
@@ -1158,19 +1515,20 @@ function resetAll(){
 }
 
 /* ---------- events ---------- */
-["amount","note"].forEach(id=>document.getElementById(id).addEventListener("keydown",e=>{if(e.key==="Enter")addTx();}));
+["amount","note","txDate"].forEach(id=>document.getElementById(id).addEventListener("keydown",e=>{if(e.key==="Enter")addTx();}));
 document.getElementById("amtValue").addEventListener("keydown",e=>{if(e.key==="Enter")confirmAmt();});
 ["fAmount","fDays"].forEach(id=>document.getElementById(id).addEventListener("keydown",e=>{if(e.key==="Enter")saveFixed();}));
-["txAmount","txNote"].forEach(id=>document.getElementById(id).addEventListener("keydown",e=>{if(e.key==="Enter")saveTxEdit();}));
+["txAmount","txNote","txEditDate"].forEach(id=>document.getElementById(id).addEventListener("keydown",e=>{if(e.key==="Enter")saveTxEdit();}));
 document.getElementById("aAmount").addEventListener("keydown",e=>{if(e.key==="Enter")saveAsset();});
 document.getElementById("histSearch").addEventListener("keydown",e=>{if(e.key==="Enter")e.preventDefault();});
 ["liUser","liPass","liPass2","liCode","liApi"].forEach(id=>document.getElementById(id).addEventListener("keydown",e=>{if(e.key==="Enter")submitLoginForm();}));
 document.getElementById("logoutBtn").onclick=logout;
-["goalScrim","debtScrim","amtScrim","fixedScrim","fixInfoScrim","txScrim","dueScrim","assetScrim","fullHistoryScrim","fullGoalsScrim","fullAssetsScrim","fullFixedScrim"].forEach(id=>document.getElementById(id).addEventListener("click",e=>{if(e.target.id===id)closeScrim(id);}));
+["goalScrim","debtScrim","amtScrim","fixedScrim","fixInfoScrim","txScrim","dueScrim","assetScrim","fullHistoryScrim","fullGoalsScrim","fullAssetsScrim","fullFixedScrim","calcScrim","cardSpendScrim","piggyScrim"].forEach(id=>document.getElementById(id).addEventListener("click",e=>{if(e.target.id===id)closeScrim(id);}));
 document.addEventListener("keydown",e=>{if(e.key==="Escape")document.querySelectorAll(".scrim.show").forEach(s=>s.classList.remove("show"));});
 window.addEventListener("scroll",()=>document.getElementById("appbar").classList.toggle("scrolled",window.scrollY>4));
 
 /* ---------- init ---------- */
+document.getElementById("txDate").value=todayInput();
 applyTheme();applyHideBalanceIcon();setType("exp");render();
 if(syncCapable){
   document.getElementById("syncChip").style.display="";

@@ -1,0 +1,40 @@
+# Продакшн-compose для сервера: тянет готовый образ из Docker Hub, ничего не собирает.
+# На сервере нужен только этот файл — исходники клонировать не обязательно.
+#
+# Запуск:
+#   docker compose -f docker-compose.prod.yml pull
+#   docker compose -f docker-compose.prod.yml up -d
+#
+# Обновление на новую версию (после того как локально собрали и запушили новый образ):
+#   docker compose -f docker-compose.prod.yml pull
+#   docker compose -f docker-compose.prod.yml up -d
+# (сделает docker compose down + up автоматически, данные в volume не тронет)
+
+name: moi-finansy
+
+services:
+  finance:
+    image: shadowkick/finance:latest
+    container_name: finance
+    restart: unless-stopped
+    environment:
+      HOST: 0.0.0.0
+      PORT: 8787
+      # Фронтенд на GitHub Pages — включаем CORS для него:
+      ALLOWED_ORIGIN: https://burning-house.online
+      # Раскомментируйте, чтобы закрыть саморегистрацию произвольным людям из интернета
+      # (адрес /api/register будет публично доступен на money.burninghouse.ru):
+      # REGISTER_CODE: замените-на-свой-секрет
+      # Для ПЕРВОГО запуска, чтобы сразу создать пользователя (на существующую базу не влияет):
+      # FIN_USER: myname
+      # FIN_PASS: my-strong-password
+    ports:
+      # Только на localhost — наружу отдаёт nginx на порту 8443 (см. README-deploy.md).
+      # ВАЖНО для этого сервера: порт 443 (TCP и UDP) уже занят VPN (3x-ui/VLESS и Hysteria2),
+      # поэтому приложение сознательно вынесено на отдельный порт 8443, а не на стандартный 443.
+      - "127.0.0.1:8787:8787"
+    volumes:
+      - finance-data:/app/data
+
+volumes:
+  finance-data:
