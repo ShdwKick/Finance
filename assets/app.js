@@ -1494,6 +1494,45 @@ document.getElementById("hideBalBtn").onclick=()=>{
   state.hideBalance=!state.hideBalance;save();applyHideBalanceIcon();render();
 };
 
+/* ---------- профиль: отображаемое имя, смена пароля, здесь же бэкап ---------- */
+const BRAND_SUB_DEFAULT="Доходы · расходы · цели · долги";
+function applyDisplayName(){
+  document.getElementById("brandSub").textContent=state.displayName||BRAND_SUB_DEFAULT;
+}
+function saveDisplayName(v){
+  state.displayName=String(v||"").trim().slice(0,60);
+  save();applyDisplayName();
+}
+function openProfile(){
+  document.getElementById("pfName").value=state.displayName||"";
+  document.getElementById("pfPasswordBlock").style.display=(syncCapable&&token)?"":"none";
+  document.getElementById("pfCurPass").value="";
+  document.getElementById("pfNewPass").value="";
+  document.getElementById("pfNewPass2").value="";
+  document.getElementById("pfPassErr").textContent="";
+  openScrim("profileScrim");
+}
+async function changePassword(){
+  const cur=document.getElementById("pfCurPass").value;
+  const nw=document.getElementById("pfNewPass").value;
+  const nw2=document.getElementById("pfNewPass2").value;
+  const err=document.getElementById("pfPassErr");err.textContent="";
+  if(!cur||!nw){err.textContent="Заполните оба поля пароля";return;}
+  if(nw!==nw2){err.textContent="Новые пароли не совпадают";return;}
+  if(nw.length<6){err.textContent="Новый пароль: минимум 6 символов";return;}
+  try{
+    const r=await fetch(apiBase+"/api/account/password",{method:"PUT",
+      headers:{"Content-Type":"application/json","Authorization":"Bearer "+token},
+      body:JSON.stringify({currentPassword:cur,newPassword:nw})});
+    if(r.status===401){err.textContent="Неверный текущий пароль";return;}
+    if(!r.ok){const j=await r.json().catch(()=>({}));err.textContent=j.error||"Не удалось сменить пароль";return;}
+    document.getElementById("pfCurPass").value="";
+    document.getElementById("pfNewPass").value="";
+    document.getElementById("pfNewPass2").value="";
+    snack("Пароль изменён");
+  }catch(e){err.textContent="Не удалось подключиться к серверу";}
+}
+
 /* ---------- export / import / reset ---------- */
 function exportData(){
   const blob=new Blob([JSON.stringify(state,null,2)],{type:"application/json"});
@@ -1505,7 +1544,7 @@ function importData(ev){
   const f=ev.target.files[0];if(!f)return;const r=new FileReader();
   r.onload=()=>{try{const d=JSON.parse(r.result);if(!Array.isArray(d.tx))throw 0;
     const th=state.theme;state=normalize(d);state.theme=d.theme||th;
-    save();applyTheme();render();snack("Данные загружены");}
+    save();applyTheme();applyDisplayName();render();snack("Данные загружены");}
     catch(e){snack("Не удалось прочитать файл");}};
   r.readAsText(f);ev.target.value="";
 }
@@ -1521,21 +1560,21 @@ document.getElementById("amtValue").addEventListener("keydown",e=>{if(e.key==="E
 ["txAmount","txNote","txEditDate"].forEach(id=>document.getElementById(id).addEventListener("keydown",e=>{if(e.key==="Enter")saveTxEdit();}));
 document.getElementById("aAmount").addEventListener("keydown",e=>{if(e.key==="Enter")saveAsset();});
 document.getElementById("histSearch").addEventListener("keydown",e=>{if(e.key==="Enter")e.preventDefault();});
-["liUser","liPass","liPass2","liCode","liApi"].forEach(id=>document.getElementById(id).addEventListener("keydown",e=>{if(e.key==="Enter")submitLoginForm();}));
+["liUser","liPass","liPass2"].forEach(id=>document.getElementById(id).addEventListener("keydown",e=>{if(e.key==="Enter")submitLoginForm();}));
 document.getElementById("logoutBtn").onclick=logout;
-["goalScrim","debtScrim","amtScrim","fixedScrim","fixInfoScrim","txScrim","dueScrim","assetScrim","fullHistoryScrim","fullGoalsScrim","fullAssetsScrim","fullFixedScrim","calcScrim","cardSpendScrim","piggyScrim"].forEach(id=>document.getElementById(id).addEventListener("click",e=>{if(e.target.id===id)closeScrim(id);}));
+["goalScrim","debtScrim","amtScrim","fixedScrim","fixInfoScrim","txScrim","dueScrim","assetScrim","fullHistoryScrim","fullGoalsScrim","fullAssetsScrim","fullFixedScrim","calcScrim","cardSpendScrim","piggyScrim","profileScrim"].forEach(id=>document.getElementById(id).addEventListener("click",e=>{if(e.target.id===id)closeScrim(id);}));
 document.addEventListener("keydown",e=>{if(e.key==="Escape")document.querySelectorAll(".scrim.show").forEach(s=>s.classList.remove("show"));});
 window.addEventListener("scroll",()=>document.getElementById("appbar").classList.toggle("scrolled",window.scrollY>4));
 
 /* ---------- init ---------- */
 document.getElementById("txDate").value=todayInput();
-applyTheme();applyHideBalanceIcon();setType("exp");render();
+applyTheme();applyHideBalanceIcon();applyDisplayName();setType("exp");render();
 if(syncCapable){
   document.getElementById("syncChip").style.display="";
   document.getElementById("logoutBtn").style.display="";
   if(token){
     setSync("saving");
-    pullRemote().then(ok=>{if(ok){applyTheme();render();setSync("ok");checkDuePayments();scheduleAssetPriceRefresh();}}).catch(()=>setSync("offline"));
+    pullRemote().then(ok=>{if(ok){applyTheme();applyDisplayName();render();setSync("ok");checkDuePayments();scheduleAssetPriceRefresh();}}).catch(()=>setSync("offline"));
   }else{
     showLogin();
   }

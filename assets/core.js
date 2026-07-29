@@ -60,6 +60,7 @@ function normalize(s){
   s.piggy=(s.piggy&&typeof s.piggy==="object")
     ?{enabled:!!s.piggy.enabled,mode:s.piggy.mode||"smart",amount:Math.max(0,+s.piggy.amount||0)}
     :{enabled:false,mode:"smart",amount:0};
+  s.displayName=typeof s.displayName==="string"?s.displayName.trim().slice(0,60):"";
   return s;
 }
 function load(){
@@ -124,7 +125,6 @@ let loginMode="login";
 function authFail(){token=null;localStorage.removeItem("fin_token");loginMode="login";showLogin();}
 function showLogin(){
   loginMode="login";renderLoginMode();
-  document.getElementById("liApi").value=apiBase;
   document.getElementById("loginScrim").classList.add("show");
   setTimeout(()=>document.getElementById("liUser").focus(),120);
 }
@@ -137,7 +137,6 @@ function renderLoginMode(){
     ?"Придумайте логин и пароль — данные будут привязаны к аккаунту и синхронизироваться между устройствами."
     :"Войдите, чтобы открыть свои данные на этом устройстве. Они синхронизируются между телефоном и ПК.";
   document.getElementById("liPass2Field").style.display=reg?"":"none";
-  document.getElementById("liCodeField").style.display=reg?"":"none";
   document.getElementById("liPass").autocomplete=reg?"new-password":"current-password";
   document.getElementById("loginSubmitBtn").textContent=reg?"Зарегистрироваться":"Войти";
   document.getElementById("loginToggleBtn").textContent=reg?"Уже есть аккаунт? Войти":"Нет аккаунта? Зарегистрироваться";
@@ -145,7 +144,6 @@ function renderLoginMode(){
 }
 function submitLoginForm(){loginMode==="register"?doRegister():doLogin();}
 async function doLogin(){
-  setApiBase(document.getElementById("liApi").value);
   const u=document.getElementById("liUser").value.trim(),p=document.getElementById("liPass").value;
   const err=document.getElementById("loginErr");err.textContent="";
   if(!u||!p){err.textContent="Введите логин и пароль";return;}
@@ -156,26 +154,25 @@ async function doLogin(){
     const j=await r.json();token=j.token;localStorage.setItem("fin_token",token);
     document.getElementById("liPass").value="";hideLogin();
     try{await pullRemote();}catch(e){}
-    applyTheme();render();setSync("ok");snack("Добро пожаловать!");
+    applyTheme();applyDisplayName();render();setSync("ok");snack("Добро пожаловать!");
     checkDuePayments();
     scheduleAssetPriceRefresh();
   }catch(e){err.textContent="Не удалось подключиться к серверу";}
 }
 async function doRegister(){
-  setApiBase(document.getElementById("liApi").value);
   const u=document.getElementById("liUser").value.trim(),p=document.getElementById("liPass").value,
-    p2=document.getElementById("liPass2").value,code=document.getElementById("liCode").value.trim();
+    p2=document.getElementById("liPass2").value;
   const err=document.getElementById("loginErr");err.textContent="";
   if(!u||!p){err.textContent="Введите логин и пароль";return;}
   if(p!==p2){err.textContent="Пароли не совпадают";return;}
   try{
-    const r=await fetch(apiBase+"/api/register",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({username:u,password:p,code})});
+    const r=await fetch(apiBase+"/api/register",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({username:u,password:p})});
     if(r.status===409){err.textContent="Такой логин уже занят";return;}
-    if(r.status===401){err.textContent="Неверный код приглашения";return;}
+    if(r.status===401){err.textContent="Регистрация закрыта";return;}
     if(!r.ok){const j=await r.json().catch(()=>({}));err.textContent=j.error||"Не удалось зарегистрироваться";return;}
     const j=await r.json();token=j.token;localStorage.setItem("fin_token",token);
     document.getElementById("liPass").value="";document.getElementById("liPass2").value="";hideLogin();
-    applyTheme();render();setSync("ok");snack("Аккаунт создан!");
+    applyTheme();applyDisplayName();render();setSync("ok");snack("Аккаунт создан!");
     checkDuePayments();
     scheduleAssetPriceRefresh();
   }catch(e){err.textContent="Не удалось подключиться к серверу";}

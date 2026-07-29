@@ -254,6 +254,22 @@ const server = http.createServer(async (req, res) => {
     } catch { return json(res, 400, { error: "bad request" }); }
   }
 
+  // API: смена своего пароля (из профиля в интерфейсе)
+  if (p === "/api/account/password" && req.method === "PUT") {
+    const user = userFromToken(bearer(req));
+    if (!user) return json(res, 401, { error: "unauthorized" });
+    try {
+      const body = JSON.parse(await readBody(req) || "{}");
+      const u = getUser(user);
+      if (!u || !verifyPassword(String(body.currentPassword || ""), u.salt, u.hash))
+        return json(res, 401, { error: "bad credentials" });
+      const err = validateCreds(user, body.newPassword);
+      if (err) return json(res, 400, { error: err });
+      setUser(user, body.newPassword);
+      return json(res, 200, { ok: true });
+    } catch { return json(res, 400, { error: "bad request" }); }
+  }
+
   // API: состояние
   if (p === "/api/state") {
     const user = userFromToken(bearer(req));
