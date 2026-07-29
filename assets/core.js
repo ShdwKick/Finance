@@ -42,7 +42,7 @@ function normalize(s){
   s.goals=Array.isArray(s.goals)?s.goals:[];
   s.debts=(Array.isArray(s.debts)?s.debts:[]).map(d=>{
     // кредитка: {kind:"card", limit, used}; обычный кредит kind не имеет (считается "loan")
-    if(d.kind==="card"){d.limit=Math.max(0,+d.limit||0);d.used=Math.max(0,+d.used||0);}
+    if(d.kind==="card"){d.limit=Math.max(0,+d.limit||0);d.used=Math.max(0,+d.used||0);delete d.monthly;}
     return d;
   });
   s.fixed=(Array.isArray(s.fixed)?s.fixed:[]).map(f=>{

@@ -1,6 +1,7 @@
 <meta charset="utf-8">
 <title>Мои финансы</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" type="image/svg+xml" href="assets/favicon.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Roboto+Flex:opsz,wght@8..144,400;8..144,500;8..144,600;8..144,700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="assets/styles.css">
@@ -51,12 +52,12 @@
   <!-- ===================== STAT CARDS ===================== -->
   <div class="stat-grid3">
     <div class="stat-card">
-      <div class="sc-top"><span class="sc-ic inc"><svg class="icon sm" viewBox="0 0 24 24"><line x1="7" y1="17" x2="17" y2="7"/><polyline points="8 7 17 7 17 16"/></svg></span><span class="sc-lbl">Доходы</span></div>
+      <div class="sc-top"><span class="sc-ic inc"><svg class="icon sm" viewBox="0 0 24 24"><line x1="7" y1="17" x2="17" y2="7"/><polyline points="8 7 17 7 17 16"/></svg></span><span class="sc-lbl">Доходы за всё время</span></div>
       <div class="sc-val" id="income">0 ₽</div>
       <div class="sc-delta" id="incomeDelta"></div>
     </div>
     <div class="stat-card">
-      <div class="sc-top"><span class="sc-ic exp"><svg class="icon sm" viewBox="0 0 24 24"><line x1="7" y1="7" x2="17" y2="17"/><polyline points="17 8 17 17 8 17"/></svg></span><span class="sc-lbl">Расходы</span></div>
+      <div class="sc-top"><span class="sc-ic exp"><svg class="icon sm" viewBox="0 0 24 24"><line x1="7" y1="7" x2="17" y2="17"/><polyline points="17 8 17 17 8 17"/></svg></span><span class="sc-lbl">Расходы за всё время</span></div>
       <div class="sc-val" id="expense">0 ₽</div>
       <div class="sc-delta" id="expenseDelta"></div>
     </div>
@@ -194,7 +195,7 @@
       <div class="panel">
         <div class="panel-head">
           <span class="ph-ic e"><svg class="icon sm" viewBox="0 0 24 24"><path d="M21.21 15.89A10 10 0 1 1 8 2.83"/><path d="M22 12A10 10 0 0 0 12 2v10z"/></svg></span>
-          <h2>Аналитика расходов</h2>
+          <h2>Аналитика</h2>
           <select id="catsPeriodSel" class="mini-select" onchange="onCatsPeriodChange()">
             <option value="month">Этот месяц</option>
             <option value="prev">Прошлый месяц</option>
@@ -203,6 +204,10 @@
             <option value="all">Всё время</option>
             <option value="custom">Свой период…</option>
           </select>
+        </div>
+        <div class="mini-seg" style="margin-bottom:14px">
+          <button id="catsTypeExp" class="sel" onclick="setCatsType('exp')">Расходы</button>
+          <button id="catsTypeInc" onclick="setCatsType('inc')">Доходы</button>
         </div>
         <div class="row" id="catsCustomRange" style="display:none;margin-bottom:14px">
           <div style="flex:1"><div class="date-lbl">С</div><input type="date" id="catsFrom" class="date-input" onchange="renderCats()"></div>
@@ -375,7 +380,6 @@
         <div class="field"><input id="dLimit" type="text" inputmode="decimal" placeholder=" " oninput="sanitizeAmt(this)"><label for="dLimit">Лимит карты, ₽</label></div>
         <div class="field"><input id="dUsed" type="text" inputmode="decimal" placeholder=" " oninput="sanitizeAmt(this)"><label for="dUsed">Долг сейчас, ₽</label></div>
       </div>
-      <div class="field"><input id="dCardMonthly" type="text" inputmode="decimal" placeholder=" " oninput="sanitizeAmt(this)"><label for="dCardMonthly">Закрываю в месяц, ₽ (для нагрузки)</label></div>
     </div>
     <div style="font-size:12px;color:var(--md-sys-color-on-surface-variant);margin-top:14px">Иконка</div>
     <div class="emoji-pick" id="dEmoji"></div>

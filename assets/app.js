@@ -41,9 +41,9 @@ function netTxAmount(t){
 }
 
 /* ---------- инвесткопилка: постоянная сущность state.piggy {enabled,mode,amount} ---------- */
-/* шаг округления: фиксированный или "умный" как в Т-банке — шаг растёт с суммой покупки */
+/* шаг округления: фиксированный или "умный" — как у Т-банка, всегда округляет вверх до сотни */
 function piggyStep(amount,mode){
-  if(mode==="smart")return amount<100?10:amount<1000?50:100;
+  if(mode==="smart")return 100;
   return +mode||0;
 }
 /* сколько докинуть в копилку, чтобы сумма покупки округлилась вверх до шага (0 — если уже круглая) */
@@ -83,9 +83,10 @@ function renderPiggy(){
     </div>
   </div>`;
 }
-/* месячный платёж долга для нагрузки: кредитка учитывается, только пока по ней есть долг */
+/* вклад долга в нагрузку: у кредитки нет отдельного поля платежа — считаем всю сумму
+   текущего долга по карте, у обычного кредита — его ежемесячный платёж */
 function debtMonthly(d){
-  if(d.kind==="card")return d.used>0?(d.monthly||0):0;
+  if(d.kind==="card")return d.used||0;
   return d.monthly||0;
 }
 /* движение живых денег по операции — для баланса/спарклайна/runway. Трата с кредитки
@@ -873,7 +874,7 @@ function renderDebts(){
       return `<div class="tile">
         <div class="top"><div class="emoji">${d.emoji}</div>
           <div><div class="tname">${esc(d.name)}</div>
-          <div class="tsub">${over?"превышен лимит! долг "+fmt(d.used)+" из "+fmt(d.limit):"долг "+fmt(d.used)+" из "+fmt(d.limit)+" · доступно "+fmt(avail)}${d.monthly>0&&d.used>0?" · плачу "+fmt(d.monthly)+"/мес":""}</div></div>
+          <div class="tsub">${over?"превышен лимит! долг "+fmt(d.used)+" из "+fmt(d.limit):"долг "+fmt(d.used)+" из "+fmt(d.limit)+" · доступно "+fmt(avail)}</div></div>
           <div class="pct" ${over?'style="color:var(--md-sys-color-error)"':""}>${usedPct}%</div></div>
         <div class="linear"><i data-w="${usedPct}"${barCol?` style="background:${barCol}"`:""}></i></div>
         <div class="acts">
@@ -924,7 +925,6 @@ function openDebt(id){
   document.getElementById("dMonthly").value=d&&d.kind!=="card"?(d.monthly||""):"";
   document.getElementById("dLimit").value=d&&d.kind==="card"?d.limit:"";
   document.getElementById("dUsed").value=d&&d.kind==="card"?d.used:"";
-  document.getElementById("dCardMonthly").value=d&&d.kind==="card"?(d.monthly||""):"";
   selEmoji=d?d.emoji:(debtKind==="card"?"💳":"🏦");
   renderEmojis("dEmoji",DEBT_EMOJIS);
   openScrim("debtScrim");setTimeout(()=>document.getElementById("dName").focus(),90);
@@ -936,10 +936,9 @@ function saveDebt(){
   if(debtKind==="card"){
     const limit=parseAmount(document.getElementById("dLimit").value);
     let used=parseAmount(document.getElementById("dUsed").value);
-    const monthly=Math.max(0,parseAmount(document.getElementById("dCardMonthly").value)||0);
     if(!limit||limit<=0)return snack("Введите лимит карты");
     used=isNaN(used)?0:Math.max(0,used);
-    data={kind:"card",name,limit,used,monthly,emoji:selEmoji};
+    data={kind:"card",name,limit,used,emoji:selEmoji};
   }else{
     const total=parseAmount(document.getElementById("dTotal").value);
     let remaining=parseAmount(document.getElementById("dRemain").value);
@@ -1039,7 +1038,9 @@ function saveCardSpend(){
 /* ---------- categories breakdown ---------- */
 /* ---------- category analytics: flexible period ---------- */
 let catsPeriod="month";
+let catsType="exp";
 const CATS_PERIOD_LABEL={month:"за месяц",prev:"за прошл. мес.",["3m"]:"за 3 месяца",year:"за год",all:"за всё время",custom:"за период"};
+function setCatsType(t){catsType=t;renderCats();renderCatChanges();}
 function catsRange(){
   const now=new Date();
   switch(catsPeriod){
@@ -1076,7 +1077,7 @@ function onCatsPeriodChange(){
 function sumByCat(from,to){
   const by={};
   state.tx.forEach(t=>{
-    if(t.type!=="exp")return;
+    if(t.type!==catsType)return;
     const net=netTxAmount(t);
     if(net<=0)return; // переводы (копилка/погашение) и полностью возвращённые расходы не создают пустых категорий
     const d=new Date(t.date);
@@ -1086,11 +1087,13 @@ function sumByCat(from,to){
 }
 function renderCats(){
   const box=document.getElementById("catList");
+  document.getElementById("catsTypeExp").classList.toggle("sel",catsType==="exp");
+  document.getElementById("catsTypeInc").classList.toggle("sel",catsType==="inc");
   const{from,to}=catsRange();
   const by=sumByCat(from,to);
   let rows=Object.entries(by).sort((a,b)=>b[1]-a[1]);
   const total=rows.reduce((s,r)=>s+r[1],0);
-  if(!rows.length){box.innerHTML=empty("За выбранный период расходов пока нет","M3 3v18h18 M7 14l4-4 3 3 5-6");return;}
+  if(!rows.length){box.innerHTML=empty(catsType==="exp"?"За выбранный период расходов пока нет":"За выбранный период доходов пока нет","M3 3v18h18 M7 14l4-4 3 3 5-6");return;}
   // group tail into "Другое" for a readable donut
   if(rows.length>7){const rest=rows.slice(6).reduce((s,r)=>s+r[1],0);rows=rows.slice(0,6);rows.push(["Другое",rest]);}
 
@@ -1104,7 +1107,7 @@ function renderCats(){
   const legend=rows.map(([name,val],i)=>{
     const pct=Math.round(val/total*100);
     return `<div class="lg"><span class="sw" style="background:${CAT_COLORS[i%CAT_COLORS.length]}"></span>
-      <span class="ln">${catE("exp",name)} ${esc(name)}</span>
+      <span class="ln">${catE(catsType,name)} ${esc(name)}</span>
       <span class="lv">${fmt(val)}</span><span class="lp">${pct}%</span></div>`;
   }).join("");
   box.innerHTML=`<div class="donut-wrap">
@@ -1128,12 +1131,14 @@ function renderCatChanges(){
   rows.sort((a,b)=>Math.abs(b.d)-Math.abs(a.d));
   rows=rows.slice(0,4);
   if(!rows.length){box.innerHTML="";return;}
+  const up_is_bad=catsType==="exp"; // для расходов рост — плохо (красный), для доходов рост — хорошо (зелёный)
   box.innerHTML=`<div class="sub-head" style="margin-top:16px"><span>Заметные изменения к прошлому периоду</span></div>`+
     rows.map(r=>{
       const up=r.d>0;
+      const good=up?!up_is_bad:up_is_bad;
       return `<div class="fi-line" style="padding:4px 2px">
-        <span>${catE("exp",r.cat)} ${esc(r.cat)}</span>
-        <b style="color:${up?"var(--md-sys-color-error)":"var(--md-sys-color-primary)"}">${up?"↑":"↓"} ${Math.abs(r.d)}%</b>
+        <span>${catE(catsType,r.cat)} ${esc(r.cat)}</span>
+        <b style="color:${good?"var(--md-sys-color-primary)":"var(--md-sys-color-error)"}">${up?"↑":"↓"} ${Math.abs(r.d)}%</b>
       </div>`;
     }).join("");
 }
