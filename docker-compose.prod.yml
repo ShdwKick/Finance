@@ -28,7 +28,7 @@ services:
       # FIN_USER: myname
       # FIN_PASS: my-strong-password
     ports:
-      # Только на localhost — наружу отдаёт nginx на порту 9443 (см. README-deploy.md).
+      # Только на localhost — наружу отдаёт nginx на порту 443 (см. README-deploy.md).
       - "127.0.0.1:8787:8787"
     volumes:
       - finance-data:/app/data
