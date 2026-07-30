@@ -88,6 +88,19 @@
     --md-warn-container:#5c3f00;
   }
 
+  /* ===================== ФИРМЕННЫЕ ТОКЕНЫ ===================== */
+  /* Натрий — золотое пламя. Переопределяют значения из brand.css, который
+     подключён выше. Цвет не выбран на глаз: он от вещества, которое так горит,
+     см. BurningHouse/Design/palette.md. */
+  :root{
+    --flame-base:#b45309;
+    --flame-tip:#ffd447;
+    --night-1:#100d0a;
+    --night-2:#2a2010;
+    --dawn-1:#fffaec;
+    --dawn-2:#ffeec4;
+  }
+
   /* ===================== BASE ===================== */
   *{box-sizing:border-box;margin:0;padding:0}
   html,body{height:100%}
@@ -130,7 +143,10 @@
     display:flex;align-items:center;gap:8px;
     padding:0 clamp(12px,4vw,24px);
   }
-  .appbar .brand{width:40px;height:40px;border-radius:var(--md-sys-shape-corner-m);display:grid;place-items:center;background:var(--md-sys-color-primary-container);color:var(--md-sys-color-on-primary-container)}
+  /* Плашка с кошельком заменена фирменным локапом; знак сам несёт цвет. */
+  .appbar .bh-lockup{font-size:15px}
+  .appbar .bh-lockup .bh-mark{width:34px;height:34px}
+  .appbar .bh-lockup:focus-visible{outline:2px solid var(--md-sys-color-primary);outline-offset:4px;border-radius:6px}
   .appbar h1{font-size:22px;font-weight:600;letter-spacing:0}
   .appbar .sub{font-size:12px;color:var(--md-sys-color-on-surface-variant);margin-top:-2px}
   .appbar .spacer{flex:1}
@@ -479,14 +495,20 @@
   .sync.saving .dot{background:var(--md-warn)}
   .sync.offline .dot{background:var(--md-sys-color-error)}
   @media(max-width:560px){.sync{display:none!important}}
+  /* Прежние фиолетовые пятна убраны — фон теперь фирменный, .bh-backdrop
+     внутри самого scrim (см. разметку и BurningHouse/Design/motion.md). */
   .login-scrim{position:fixed;inset:0;z-index:120;display:none;place-items:center;padding:20px;
-    background:var(--md-sys-color-surface);
-    background-image:
-      radial-gradient(60vw 40vw at 100% -5%, color-mix(in srgb,var(--md-sys-color-primary) 20%,transparent), transparent 60%),
-      radial-gradient(55vw 45vw at -10% 105%, color-mix(in srgb,var(--md-sys-color-tertiary) 18%,transparent), transparent 60%);}
+    background:var(--md-sys-color-surface)}
   .login-scrim.show{display:grid}
-  .login-card{background:var(--md-sys-color-surface-container-lowest);border:1px solid var(--md-sys-color-outline-variant);border-radius:var(--md-sys-shape-corner-xl);padding:28px;width:100%;max-width:380px;box-shadow:var(--e2);animation:pop .3s var(--ease-emph-dec)}
-  .login-card .lg-brand{width:56px;height:56px;border-radius:var(--md-sys-shape-corner-l);display:grid;place-items:center;background:var(--md-sys-color-primary-container);color:var(--md-sys-color-on-primary-container);margin-bottom:16px}
+  .login-card{
+    /* над горящим фоном, который лежит на z-index:0 */
+    position:relative;z-index:1;
+    /* полупрозрачная: фон обязан просвечивать, иначе дом виден только по краям */
+    background:color-mix(in srgb,var(--md-sys-color-surface-container-lowest) 84%,transparent);
+    backdrop-filter:blur(16px) saturate(1.15);
+    border:1px solid var(--md-sys-color-outline-variant);border-radius:var(--md-sys-shape-corner-xl);
+    padding:28px;width:100%;max-width:380px;box-shadow:var(--e2);animation:pop .3s var(--ease-emph-dec)}
+  .login-card .lg-lockup{margin-bottom:16px;font-size:16px}
   .login-card h2{font-size:26px;font-weight:600}
   .login-card p{font-size:13px;color:var(--md-sys-color-on-surface-variant);margin:6px 0 6px}
   .login-err{color:var(--md-sys-color-error);font-size:13px;min-height:18px;margin-top:10px}
