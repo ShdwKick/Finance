@@ -148,9 +148,37 @@
   .icon-btn:active::after{opacity:.12}
   .icon-btn.tonal{background:var(--md-sys-color-secondary-container);color:var(--md-sys-color-on-secondary-container)}
 
-  /* ===================== BALANCE CARD ===================== */
-  .bal-card{
-    margin:12px 0 0;
+  /* ===================== OVERVIEW: balance + stat cards ===================== */
+  /* Общий баланс + Доходы/Расходы/Долги — одна сетка, чтобы гибко переставлять
+     блоки под ширину экрана (см. .overview-grid ниже), а не два независимых блока */
+  .overview-grid{
+    display:grid;gap:14px;margin:12px 0 20px;
+    grid-template-columns:1fr 1fr 1fr;
+    grid-template-areas:"bal bal bal" "inc exp debt";
+  }
+  .overview-grid>*{min-width:0}
+  .overview-grid>*:nth-child(1){grid-area:bal}
+  .overview-grid>*:nth-child(2){grid-area:inc}
+  .overview-grid>*:nth-child(3){grid-area:exp}
+  .overview-grid>*:nth-child(4){grid-area:debt}
+  /* мобильные — блок 2×2 (баланс/доходы сверху, расходы/долги снизу), без вылезающего
+     на всю ширину столбика из 3-4 карточек одна под одной */
+  @media(max-width:720px){
+    .overview-grid{
+      grid-template-columns:1fr 1fr;
+      grid-template-areas:"bal inc" "exp debt";
+    }
+    /* графику-спарклайн некуда красиво влезть в половину экрана — на мобильном её нет,
+       баланс остаётся компактной карточкой того же вида, что остальные три */
+    .spark-wrap{display:none}
+  }
+  /* .bal-card теперь стоит в одном ряду со .stat-card — переопределяем скругление/отступы
+     базового .panel (они крупнее — рассчитаны на самостоятельный full-width блок), чтобы
+     все 4 карточки в overview-grid выглядели одинаково */
+  .panel.bal-card{
+    border-radius:var(--md-sys-shape-corner-l);
+    padding:16px;
+    margin-bottom:0;
     animation:rise .5s var(--ease-emph-dec) both;
   }
   .bal-head{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:500;color:var(--md-sys-color-on-surface-variant)}
@@ -175,14 +203,6 @@
   .spark-dot-h{opacity:0;transition:opacity .1s}
 
   /* ===================== STAT CARDS ===================== */
-  .stat-grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin:16px 0 20px}
-  .stat-grid3>*{min-width:0}
-  /* на узких экранах — 2 колонки (Доходы/Расходы), «Долги» на всю ширину под ними,
-     а не все три карточки одна под другой на весь экран */
-  @media(max-width:720px){
-    .stat-grid3{grid-template-columns:1fr 1fr}
-    .stat-grid3>*:nth-child(3){grid-column:1/-1}
-  }
   .stat-card{
     background:var(--md-sys-color-surface-container-lowest);
     border:1px solid var(--md-sys-color-outline-variant);
@@ -192,6 +212,7 @@
   }
   .stat-card:nth-child(2){animation-delay:.06s}
   .stat-card:nth-child(3){animation-delay:.12s}
+  .stat-card:nth-child(4){animation-delay:.18s}
   .stat-card .sc-top{display:flex;align-items:center;gap:10px;margin-bottom:12px}
   .stat-card .sc-ic{width:34px;height:34px;border-radius:var(--md-sys-shape-corner-m);display:grid;place-items:center;flex:none}
   .stat-card .sc-ic.inc{background:var(--md-sys-color-primary-container);color:var(--md-sys-color-primary)}

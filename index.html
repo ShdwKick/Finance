@@ -29,28 +29,27 @@
 </div>
 
 <div class="content">
-  <!-- ===================== BALANCE CARD ===================== -->
-  <div class="panel bal-card">
-    <div class="bal-head">
-      <svg class="icon sm" viewBox="0 0 24 24"><path d="M12 1v22"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
-      Общий баланс
-      <button class="icon-btn xs" id="hideBalBtn" title="Скрыть баланс" aria-label="Скрыть баланс"></button>
-    </div>
-    <div class="bal-body">
-      <div>
-        <div class="num" id="balance">0 ₽</div>
-        <div class="delta flat" id="balanceDelta">Добавьте операции</div>
-        <div class="networth" id="netWorthLine"></div>
+  <!-- ===================== OVERVIEW: balance + stat cards ===================== -->
+  <div class="overview-grid">
+    <div class="panel bal-card">
+      <div class="bal-head">
+        <svg class="icon sm" viewBox="0 0 24 24"><path d="M12 1v22"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+        Общий баланс
+        <button class="icon-btn xs" id="hideBalBtn" title="Скрыть баланс" aria-label="Скрыть баланс"></button>
       </div>
-      <div class="spark-wrap" id="sparkWrap">
-        <svg class="mini-spark" id="spark" viewBox="0 0 300 60" preserveAspectRatio="none" style="--spark:var(--md-sys-color-primary)"></svg>
-        <div class="spark-tip" id="sparkTip"></div>
+      <div class="bal-body">
+        <div>
+          <div class="num" id="balance">0 ₽</div>
+          <div class="delta flat" id="balanceDelta">Добавьте операции</div>
+          <div class="networth" id="netWorthLine"></div>
+        </div>
+        <div class="spark-wrap" id="sparkWrap">
+          <svg class="mini-spark" id="spark" viewBox="0 0 300 60" preserveAspectRatio="none" style="--spark:var(--md-sys-color-primary)"></svg>
+          <div class="spark-tip" id="sparkTip"></div>
+        </div>
       </div>
     </div>
-  </div>
 
-  <!-- ===================== STAT CARDS ===================== -->
-  <div class="stat-grid3">
     <div class="stat-card">
       <div class="sc-top"><span class="sc-ic inc"><svg class="icon sm" viewBox="0 0 24 24"><line x1="7" y1="17" x2="17" y2="7"/><polyline points="8 7 17 7 17 16"/></svg></span><span class="sc-lbl">Доходы за всё время</span></div>
       <div class="sc-val" id="income">0 ₽</div>
@@ -681,12 +680,14 @@
     <div class="lg-brand"><svg class="icon" viewBox="0 0 24 24"><path d="M3 7h18v12H3z"/><path d="M3 10h18"/><circle cx="17" cy="14.5" r="1.2" fill="currentColor" stroke="none"/></svg></div>
     <h2 id="loginTitle">Мои финансы</h2>
     <p id="loginDesc">Войдите, чтобы открыть свои данные на этом устройстве. Они синхронизируются между телефоном и ПК.</p>
-    <div class="field"><input id="liUser" type="text" placeholder=" " autocomplete="username"><label for="liUser">Логин</label></div>
-    <div class="field"><input id="liPass" type="password" placeholder=" " autocomplete="current-password"><label for="liPass">Пароль</label></div>
-    <div class="field" id="liPass2Field" style="display:none"><input id="liPass2" type="password" placeholder=" " autocomplete="new-password"><label for="liPass2">Повторите пароль</label></div>
-    <div class="login-err" id="loginErr"></div>
-    <button class="btn filled full" id="loginSubmitBtn" onclick="submitLoginForm()">Войти</button>
-    <button class="btn text full" id="loginToggleBtn" style="margin-top:8px" onclick="toggleLoginMode()">Нет аккаунта? Зарегистрироваться</button>
+    <form id="loginForm" onsubmit="submitLoginForm();return false;">
+      <div class="field"><input id="liUser" name="username" type="text" placeholder=" " autocomplete="username"><label for="liUser">Логин</label></div>
+      <div class="field"><input id="liPass" name="password" type="password" placeholder=" " autocomplete="current-password"><label for="liPass">Пароль</label></div>
+      <div class="field" id="liPass2Field" style="display:none"><input id="liPass2" name="password2" type="password" placeholder=" " autocomplete="new-password"><label for="liPass2">Повторите пароль</label></div>
+      <div class="login-err" id="loginErr"></div>
+      <button class="btn filled full" id="loginSubmitBtn" type="submit">Войти</button>
+    </form>
+    <button class="btn text full" id="loginToggleBtn" type="button" style="margin-top:8px" onclick="toggleLoginMode()">Нет аккаунта? Зарегистрироваться</button>
   </div>
 </div>
 

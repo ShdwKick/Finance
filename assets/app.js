@@ -1565,7 +1565,6 @@ document.getElementById("amtValue").addEventListener("keydown",e=>{if(e.key==="E
 ["txAmount","txNote","txEditDate"].forEach(id=>document.getElementById(id).addEventListener("keydown",e=>{if(e.key==="Enter")saveTxEdit();}));
 document.getElementById("aAmount").addEventListener("keydown",e=>{if(e.key==="Enter")saveAsset();});
 document.getElementById("histSearch").addEventListener("keydown",e=>{if(e.key==="Enter")e.preventDefault();});
-["liUser","liPass","liPass2"].forEach(id=>document.getElementById(id).addEventListener("keydown",e=>{if(e.key==="Enter")submitLoginForm();}));
 document.getElementById("logoutBtn").onclick=logout;
 ["goalScrim","debtScrim","amtScrim","fixedScrim","fixInfoScrim","txScrim","dueScrim","assetScrim","fullHistoryScrim","fullGoalsScrim","fullAssetsScrim","fullFixedScrim","calcScrim","cardSpendScrim","piggyScrim","profileScrim"].forEach(id=>document.getElementById(id).addEventListener("click",e=>{if(e.target.id===id)closeScrim(id);}));
 document.addEventListener("keydown",e=>{if(e.key==="Escape")document.querySelectorAll(".scrim.show").forEach(s=>s.classList.remove("show"));});

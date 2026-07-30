@@ -169,7 +169,46 @@ sudo ufw allow <порт>/tcp   # если включён firewall
 `cd ~/finance && sudo docker compose pull && sudo docker compose up -d`. Данные (том
 `finance-data`) при этом не трогаются.
 
+**Или автоматически** — см. «CI/CD: авто-деплой по пушу» ниже, если настроен GitHub
+Actions, всё это (сборка образа + обновление на сервере) происходит само при пуше в
+`master`.
+
 ---
+
+## CI/CD: авто-деплой по пушу в master
+
+`.github/workflows/deploy.yml` при каждом пуше в `master` (кроме правок в `*.md`,
+`deploy/` и `demo-data.json`) сам собирает образ, пушит его в Docker Hub
+(`shadowkick/finance:latest`) и по SSH на сервере выполняет `docker compose pull && up
+-d`. Работает через два джоба: `build-and-push` (собирает и пушит образ), затем
+`deploy` (ждёт первый, обновляет контейнер по SSH) — если сборка упала, деплой не
+запустится.
+
+Нужно один раз задать секреты репозитория (Settings → Secrets and variables → Actions):
+
+| Секрет | Значение |
+|---|---|
+| `DOCKERHUB_USERNAME` | логин на Docker Hub |
+| `DOCKERHUB_TOKEN` | **Access Token**, не пароль аккаунта — создаётся на hub.docker.com → Account Settings → Security → New Access Token (право Read & Write достаточно) |
+| `SSH_HOST` | IP или домен сервера |
+| `SSH_USER` | пользователь для SSH-входа (тот, под которым лежит `~/finance` и есть доступ к docker) |
+| `SSH_KEY` | приватный ключ целиком (например, содержимое `id_ed25519`, включая `-----BEGIN...` строки) |
+| `SSH_PORT` | порт SSH, если не стандартный 22 (необязательно) |
+
+Ключ лучше завести отдельный, только для деплоя (не личный):
+
+```bash
+ssh-keygen -t ed25519 -f deploy_key -N ""   # локально, две строки: deploy_key (приватный) и deploy_key.pub
+```
+
+Публичную часть (`deploy_key.pub`) добавить на сервере в
+`~/.ssh/authorized_keys` пользователя `SSH_USER`, приватную (`deploy_key`, весь файл
+целиком) — в секрет `SSH_KEY`. Локальные копии после этого можно удалить.
+
+Пользователь `SSH_USER` должен уметь выполнять `docker compose` без пароля — либо он в
+группе `docker` (`sudo usermod -aG docker <юзер>`, затем перелогиниться), либо это
+`root`. Workflow ничего не спрашивает интерактивно, так что `sudo` с запросом пароля не
+сработает.
 
 ## Хранилище: SQLite
 
