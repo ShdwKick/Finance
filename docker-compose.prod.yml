@@ -10,7 +10,7 @@
 #   docker compose -f docker-compose.prod.yml up -d
 # (сделает docker compose down + up автоматически, данные в volume не тронет)
 
-name: moi-finansy
+name: bh-finansy
 
 services:
   finance:

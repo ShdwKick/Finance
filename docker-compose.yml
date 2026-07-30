@@ -1,9 +1,9 @@
-name: moi-finansy
+name: bh-finansy
 
 services:
   finance:
     build: .
-    image: moi-finansy:latest
+    image: shadowkick/finance:latest
     container_name: finance
     restart: unless-stopped
     environment:

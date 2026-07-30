@@ -80,7 +80,7 @@ docker compose exec auth node server.js client-add finance "Мои финанс�
 Команда переноса (подробности в `README-deploy.md` репозитория Auth):
 
 ```bash
-docker run --rm -v auth-data:/app/data -v moi-finansy_finance-data:/finance:ro \
+docker run --rm -v auth_auth-data:/app/data -v moi-finansy_finance-data:/finance \
   shadowkick/auth:latest node server.js import-finance /finance/store.db
 ```
 
