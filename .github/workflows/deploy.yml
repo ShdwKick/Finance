@@ -19,6 +19,7 @@ concurrency:
 jobs:
   build-and-push:
     runs-on: ubuntu-latest
+    environment: MyServerEnv
     steps:
       - uses: actions/checkout@v4
 
@@ -40,6 +41,7 @@ jobs:
   deploy:
     needs: build-and-push
     runs-on: ubuntu-latest
+    environment: MyServerEnv
     steps:
       - name: Pull new image and restart the container over SSH
         env:
