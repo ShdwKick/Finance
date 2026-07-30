@@ -9,7 +9,9 @@ function setType(t){
   updateRefundField();
   updatePaySourceField();
 }
-function catE(type,name){return (CATS[type].find(c=>c.n===name)||{e:"💭"}).e;}
+/* иконка категории. Тип и категорию сюда приносят и записи из state, поэтому неизвестное значение
+   отдаёт заглушку, а не роняет отрисовку: одна битая операция не должна стоить всего экрана. */
+function catE(type,name){return ((CATS[type]||[]).find(c=>c.n===name)||{e:"💭"}).e;}
 
 /* ---------- возврат, привязанный к конкретному расходу ---------- */
 /* "Возврат" среди доходов можно привязать к расходу (напр. оплатил один чек за всех, друзья
@@ -1531,7 +1533,11 @@ function importData(ev){
   const f=ev.target.files[0];if(!f)return;const r=new FileReader();
   r.onload=()=>{try{const d=JSON.parse(r.result);if(!Array.isArray(d.tx))throw 0;
     const th=state.theme;state=normalize(d);state.theme=d.theme||th;
-    save();applyTheme();applyDisplayName();render();snack("Данные загружены");}
+    // отчёт normalize(): о повреждённых записях говорим прямо, чтобы потеря не была молчаливой
+    const lost=normalizeReport?normalizeReport.total:0;
+    save();applyTheme();applyDisplayName();render();
+    snack(lost?`Данные загружены · пропущено ${lost} ${plural(lost,["повреждённая запись","повреждённые записи","повреждённых записей"])}`
+              :"Данные загружены");}
     catch(e){snack("Не удалось прочитать файл");}};
   r.readAsText(f);ev.target.value="";
 }
