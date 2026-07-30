@@ -17,6 +17,11 @@ services:
     image: shadowkick/finance:latest
     container_name: finance
     restart: unless-stopped
+    labels:
+      # Разрешаем Watchtower обновлять этот контейнер автоматически, когда в Docker Hub
+      # появляется новый образ. Без метки он его не тронет. Установка Watchtower —
+      # deploy/watchtower-compose.yml в репозитории Auth (ставится один раз на сервер).
+      com.centurylinklabs.watchtower.enable: "true"
     environment:
       HOST: 0.0.0.0
       PORT: 8787

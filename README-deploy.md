@@ -172,50 +172,69 @@ sudo ufw allow <порт>/tcp   # если включён firewall
 
 ### Обновление в будущем
 
-Собрали новую версию → `docker build ... && docker push ...` (шаг 1) → на сервере
+**Штатно ничего делать не нужно:** пуш в `master` → GitHub Actions собирает и публикует
+образ → Watchtower на сервере подхватывает его в пределах интервала опроса (~15 минут).
+См. «CI/CD» ниже.
+
+Если нужно прямо сейчас, не дожидаясь Watchtower, — на сервере
 `cd ~/finance && sudo docker compose pull && sudo docker compose up -d`. Данные (том
 `finance-data`) при этом не трогаются.
 
-**Или автоматически** — см. «CI/CD: авто-деплой по пушу» ниже, если настроен GitHub
-Actions, всё это (сборка образа + обновление на сервере) происходит само при пуше в
-`master`.
-
 ---
 
-## CI/CD: авто-деплой по пушу в master
+## CI/CD: сборка по пушу + автообновление на сервере
 
-`.github/workflows/deploy.yml` при каждом пуше в `master` (кроме правок в `*.md`,
-`deploy/` и `demo-data.json`) сам собирает образ, пушит его в Docker Hub
-(`shadowkick/finance:latest`) и по SSH на сервере выполняет `docker compose pull && up
--d`. Работает через два джоба: `build-and-push` (собирает и пушит образ), затем
-`deploy` (ждёт первый, обновляет контейнер по SSH) — если сборка упала, деплой не
-запустится.
+Модель **pull**, а не push: `.github/workflows/deploy.yml` при каждом пуше в `master`
+(кроме правок в `*.md`, `deploy/` и `demo-data.json`) собирает образ и пушит его в
+Docker Hub (`shadowkick/finance:latest`) — и на этом останавливается. На сервер он не
+ходит вообще. Новый образ забирает **Watchtower**, который крутится на сервере и
+раз в интервал опроса проверяет, не изменился ли образ помеченных контейнеров.
 
-Нужно один раз задать секреты репозитория (Settings → Secrets and variables → Actions):
+Зачем так: в репозитории не нужно хранить SSH-ключ к серверу. Единственный секрет —
+токен Docker Hub, который доступа к серверу не даёт. Раньше здесь был второй джоб,
+заходивший по SSH и делавший `docker compose pull && up -d`; он убран.
+
+**Секреты репозитория** (Settings → Secrets and variables → Actions, окружение `MyServerEnv`):
 
 | Секрет | Значение |
 |---|---|
 | `DOCKERHUB_USERNAME` | логин на Docker Hub |
-| `DOCKERHUB_TOKEN` | **Access Token**, не пароль аккаунта — создаётся на hub.docker.com → Account Settings → Security → New Access Token (право Read & Write достаточно) |
-| `SSH_HOST` | IP или домен сервера |
-| `SSH_USER` | пользователь для SSH-входа (тот, под которым лежит `~/finance` и есть доступ к docker) |
-| `SSH_KEY` | приватный ключ целиком (например, содержимое `id_ed25519`, включая `-----BEGIN...` строки) |
-| `SSH_PORT` | порт SSH, если не стандартный 22 (необязательно) |
+| `DOCKERHUB_TOKEN` | **Access Token**, не пароль аккаунта — hub.docker.com → Account Settings → Security → New Access Token (права Read & Write достаточно) |
 
-Ключ лучше завести отдельный, только для деплоя (не личный):
+Секреты `SSH_HOST`/`SSH_USER`/`SSH_KEY`/`SSH_PORT` больше не используются — их можно
+удалить, а публичный ключ убрать из `~/.ssh/authorized_keys` пользователя `github`
+на сервере.
+
+**Watchtower ставится один раз на всю машину**, не на каждый проект. Файл и подробная
+инструкция — `deploy/watchtower-compose.yml` в репозитории Auth (там же в
+`README-deploy.md` разъяснён выбор интервала и лимиты Docker Hub). Кратко:
 
 ```bash
-ssh-keygen -t ed25519 -f deploy_key -N ""   # локально, две строки: deploy_key (приватный) и deploy_key.pub
+mkdir -p ~/watchtower && cd ~/watchtower
+# скопировать deploy/watchtower-compose.yml из репозитория Auth как docker-compose.yml
+docker compose up -d
 ```
 
-Публичную часть (`deploy_key.pub`) добавить на сервере в
-`~/.ssh/authorized_keys` пользователя `SSH_USER`, приватную (`deploy_key`, весь файл
-целиком) — в секрет `SSH_KEY`. Локальные копии после этого можно удалить.
+Обновляются только контейнеры с меткой — режим opt-in, чтобы Watchtower не полез
+обновлять xray, WireGuard и остальную инфраструктуру этого сервера. У «Финансов»
+метка уже прописана в `docker-compose.prod.yml`:
 
-Пользователь `SSH_USER` должен уметь выполнять `docker compose` без пароля — либо он в
-группе `docker` (`sudo usermod -aG docker <юзер>`, затем перелогиниться), либо это
-`root`. Workflow ничего не спрашивает интерактивно, так что `sudo` с запросом пароля не
-сработает.
+```yaml
+labels:
+  com.centurylinklabs.watchtower.enable: "true"
+```
+
+Что важно помнить:
+
+- **Зелёный прогон Actions = «образ опубликован», а не «уже на проде».** Выкат
+  произойдёт в пределах интервала опроса (по умолчанию 15 минут). Нужно сейчас —
+  `cd ~/finance && docker compose pull && docker compose up -d`.
+- **Правки самого `docker-compose.prod.yml` Watchtower не применяет** — он подменяет
+  только образ, сохраняя текущую конфигурацию контейнера. Поменяли env или метки —
+  нужен `git pull` на сервере и обычный `docker compose up -d`.
+- **`deploy/` в образ не входит** — nginx-конфиги как раньше применяются вручную
+  (`cp` + `nginx -t` + `reload`).
+- Что и когда обновилось — `docker logs watchtower`.
 
 ## Хранилище: SQLite
 
