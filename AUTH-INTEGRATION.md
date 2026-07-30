@@ -1,9 +1,12 @@
-# Подключение сервиса к общему аккаунту BurningHouse
+# Авторизация «Моих финансов»
 
 «Мои финансы» больше не держат своих пользователей: аккаунты, пароли и вход живут в
 отдельном сервисе `auth.burninghouse.ru` (репозиторий `BurningHouse/Auth`), общем для всех
-проектов. Этот файл — рабочий рецепт: сначала как всё устроено здесь, потом как
-подключить следующий проект, потом как прошёл переезд.
+проектов. Этот файл — про то, как подключён именно этот сервис и как прошёл переезд.
+
+> **Подключаете НОВЫЙ проект?** Общее руководство — `INTEGRATION.md` в репозитории
+> Auth, там же запускаемый пример в `examples/minimal-service/`. Здесь дублировать
+> его не будем, чтобы две копии не разъехались.
 
 Развёртывание самого auth-сервиса — в его `README-deploy.md`.
 
@@ -34,86 +37,32 @@ Finance: кнопка «Войти»
 
 ---
 
-## Что понадобится новому сервису
+## Как подключены «Мои финансы»
 
-### 1. Зарегистрировать сервис в auth
+Конкретно этот сервис — минимальный потребитель: один защищённый ресурс и никакого
+собственного профиля.
 
-```bash
-docker compose exec auth node server.js client-add notes "Заметки" https://notes.burninghouse.ru/
-```
+| Что | Где смотреть |
+|---|---|
+| Проверка токена на бэкенде | `auth.userFromRequest(req)` в `/api/state`, [server.js](server.js) |
+| Адрес auth отдаётся фронту | `GET /api/config` там же — чтобы домен не был зашит в статику |
+| Вход и обновление токена на фронте | `initAuth` / `pushRemote` / `pullRemote`, [assets/core.js](assets/core.js) |
+| Кнопка «Войти» вместо формы | `#loginScrim` в [index.html](index.html), `startLogin()` |
+| Ссылка в кабинет вместо смены пароля | `openAccount()` в профиле, [assets/app.js](assets/app.js) |
+| Копии библиотек | `auth-client.js` (сервер) и `assets/auth-client.js` (фронт) |
 
-`redirect_uri` сверяется побайтово, включая слэш на конце.
-
-### 2. Скопировать две библиотеки
-
-Обе без зависимостей, лежат в репозитории Auth в каталоге `client/`:
-
-| Откуда | Куда | Зачем |
-|---|---|---|
-| `client/auth-client.js` | рядом с `server.js` | проверка токена на бэкенде |
-| `client/auth-client-browser.js` | в `assets/` (здесь — как `assets/auth-client.js`) | вход, обновление токена и `fetch` на фронте |
-
-Копия, а не пакет — ровно по той же причине, по которой во всех этих проектах нет
-`node_modules`: одна зависимость тянет за собой обновления, аудит и `npm install` в
-образе. Файлы маленькие; если поменяются — просто скопировать заново.
-
-### 3. Бэкенд: проверять токен
-
-```js
-const auth = require("./auth-client")({
-  issuer:   process.env.AUTH_ISSUER,      // https://auth.burninghouse.ru
-  audience: process.env.AUTH_CLIENT_ID,   // notes
-});
-auth.warmup();   // подтянуть ключи заранее, чтобы первый запрос не ждал сеть
-
-// в обработчике:
-const user = await auth.userFromRequest(req);   // { id, username, email, sid } | null
-if (!user) return json(res, 401, { error: "unauthorized" });
-// user.id — стабильный UUID, именно его и надо класть в свои таблицы
-```
-
-Живой пример — `/api/state` в [server.js](server.js).
-
-Ещё сервису стоит отдавать фронту адрес auth (чтобы тот не был зашит в статику):
-
-```js
-if (p === "/api/config") return json(res, 200, { authBase: AUTH_BASE, clientId: AUTH_CLIENT_ID });
-```
-
-### 4. Фронт: вход и запросы
-
-```html
-<script src="assets/auth-client.js"></script>
-```
-
-```js
-const cfg = await (await fetch("/api/config")).json();
-const auth = createAuthClient({
-  authBase: cfg.authBase,
-  clientId: cfg.clientId,
-  redirectUri: location.origin + location.pathname,
-  storagePrefix: "notes",
-});
-
-await auth.handleRedirect();          // вернулись с ?code=… → обменять на токены
-if (!auth.isAuthenticated()) auth.login();   // иначе увести на страницу входа
-
-const res = await auth.fetch("/api/data");   // токен подставится сам
-// протухший access обновится молча и запрос повторится; если обновить нечем —
-// вылетит AuthRequiredError, это и есть «пора логиниться заново»
-```
-
-Живой пример — `initAuth` / `pushRemote` / `pullRemote` в [assets/core.js](assets/core.js).
-
-Смену пароля, почту и список устройств делать у себя не нужно: всё это на
-`auth.burninghouse.ru/` — ведите туда ссылкой (`auth.accountUrl()`).
-
-### 5. Окружение
+Окружение:
 
 ```yaml
 environment:
-  AUTH_ISSUER: https://auth.burninghouse.ru   # обязателен; сверяется побайтово
-  AUTH_CLIENT_ID: notes
+  AUTH_ISSUER: https://auth.burninghouse.ru   # обязателен, сверяется побайтово
+  AUTH_CLIENT_ID: finance
+```
+
+Зарегистрирован в auth как:
+
+```bash
+docker compose exec auth node server.js client-add finance "Мои финансы" https://money.burninghouse.ru/
 ```
 
 ---
