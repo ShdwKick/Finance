@@ -274,7 +274,15 @@ async function initAuth(){
 }
 function startLogin(){
   if(!auth){document.getElementById("loginErr").textContent="Сервер недоступен, попробуйте обновить страницу";return;}
-  auth.login();
+  /* Карточка уходит, и только потом происходит навигация на auth-домен —
+     иначе подмена страницы выглядит рывком. Фон при этом остаётся: он одинаков
+     здесь и там, и именно он склеивает две страницы в один переход.
+     Задержка обязана совпадать с длительностью .bh-leaving в brand.css. */
+  const card=document.querySelector("#loginScrim .login-card");
+  const instant=matchMedia("(prefers-reduced-motion: reduce)").matches;
+  if(!card||instant)return auth.login();
+  card.classList.add("bh-leaving");
+  setTimeout(()=>auth.login(),200);
 }
 function openAccount(){if(auth)window.open(auth.accountUrl(),"_blank","noopener");}
 

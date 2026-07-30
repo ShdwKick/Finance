@@ -116,16 +116,19 @@
   .scroll-thin::-webkit-scrollbar-track{background:transparent}
   .scroll-thin::-webkit-scrollbar-thumb{background:var(--md-sys-color-outline-variant);border-radius:var(--md-sys-shape-corner-full)}
   .scroll-thin::-webkit-scrollbar-thumb:hover{background:var(--md-sys-color-outline)}
+  /* Базовый цвет отдан наверх, на html: фирменный фон лежит на z-index:-1 и
+     под непрозрачной заливкой body его бы просто не было видно.
+     Прежние фиолетовые пятна убраны — теперь их роль играет горящий дом. */
+  html{
+    background:var(--md-sys-color-surface);
+    transition:background-color .3s var(--ease-std);
+  }
   body{
     font-family:var(--md-font);
     color:var(--md-sys-color-on-surface);
     min-height:100%;
-    background:var(--md-sys-color-surface);
-    background-image:
-      radial-gradient(60vw 40vw at 100% -5%, color-mix(in srgb,var(--md-sys-color-primary) 16%,transparent), transparent 60%),
-      radial-gradient(55vw 45vw at -10% 105%, color-mix(in srgb,var(--md-sys-color-tertiary) 14%,transparent), transparent 60%);
-    background-attachment:fixed;
-    transition:background-color .3s var(--ease-std),color .3s var(--ease-std);
+    background:transparent;
+    transition:color .3s var(--ease-std);
     -webkit-font-smoothing:antialiased;
   }
   .icon{width:24px;height:24px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;flex:none}

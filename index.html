@@ -8,6 +8,16 @@
 <link rel="stylesheet" href="assets/styles.css">
 
 <!-- ===================== APP BAR ===================== -->
+<!-- Горящий дом под всем приложением. Приглушённый вариант: панели интерфейса
+     непрозрачны, поэтому фон подсвечивает поля вокруг них, а не спорит с
+     содержимым. Искр меньше, чем на входе, и без прохода света — здесь работают,
+     а не любуются. -->
+<div class="bh-backdrop bh-backdrop--page bh-backdrop--quiet" aria-hidden="true">
+  <div class="bh-layer"><div class="bh-glow"></div></div>
+  <div class="bh-layer"><div class="bh-haze"></div></div>
+  <div class="bh-layer bh-sparks bh-sparks--settle" data-bh-sparks="5"></div>
+</div>
+
 <div class="appbar" id="appbar">
   <div class="appbar-inner">
     <a class="bh-lockup" href="/" aria-label="Мои финансы — BurningHouse">
