@@ -89,14 +89,23 @@ curl -fsSL https://get.docker.com | sudo sh
 ```bash
 git clone https://github.com/ShdwKick/Finance.git ~/finance
 cd ~/finance
-cp docker-compose.prod.yml docker-compose.yml
-# откройте docker-compose.yml и поправьте image: на свой <docker-hub-логин>/finance:latest
 
-sudo docker compose pull
-sudo docker compose up -d
-sudo docker compose logs -f finance   # Ctrl+C выходит из просмотра, контейнер продолжает работать
+sudo docker compose -f docker-compose.prod.yml pull
+sudo docker compose -f docker-compose.prod.yml up -d
+sudo docker compose -f docker-compose.prod.yml logs -f finance   # Ctrl+C выходит из просмотра, контейнер продолжает работать
 curl -s http://127.0.0.1:8787/api/health   # ожидаем {"ok":true}
 ```
+
+⚠️ **Не копируйте `docker-compose.prod.yml` поверх `docker-compose.yml`** (раньше здесь
+советовалось именно так). `docker-compose.yml` лежит в репозитории и нужен для локальной
+разработки — он **собирает образ из исходников**, а не тянет готовый. Перезаписав его,
+вы, во-первых, получите на сервере локальную сборку вместо опубликованного образа, если
+однажды забудете `-f`; во-вторых, `git pull` начнёт отказываться работать
+(«local changes would be overwritten»). Если такая копия уже сделана — верните файл:
+`git checkout -- docker-compose.yml`, и дальше везде используйте `-f docker-compose.prod.yml`.
+
+Чтобы не писать `-f` каждый раз:
+`echo 'alias dcfin="docker compose -f ~/finance/docker-compose.prod.yml"' >> ~/.bashrc`.
 
 Контейнер слушает только `127.0.0.1:8787` — снаружи не виден напрямую, наружу его
 выставит nginx на следующем шаге.
@@ -236,6 +245,36 @@ labels:
   (`cp` + `nginx -t` + `reload`).
 - Что и когда обновилось — `docker logs watchtower`.
 
+## Переименование проекта в compose (и что будет с данными)
+
+Имя проекта (`name:` в начале compose-файла) участвует в имени тома: `bh-finansy` даёт
+`bh-finansy_finance-data`. **Docker не переименовывает тома при смене `name:`** — он
+просто создаст новый пустой, а старый останется висеть в стороне. То есть после
+безобидного на вид `up -d` приложение откроется с пустой базой, как будто данные пропали
+(они не пропали, но выглядит это неприятно).
+
+Переносить нужно руками, при остановленном контейнере — тогда SQLite закрывает базу
+чисто и WAL дописывается в основной файл:
+
+```bash
+cd ~/finance
+docker compose -f docker-compose.prod.yml down          # СТАРЫМ файлом, до git pull
+
+docker volume create bh-finansy_finance-data
+docker run --rm -v <старый-том>:/from -v bh-finansy_finance-data:/to \
+  alpine sh -c 'cd /from && cp -a . /to'
+
+docker run --rm -v bh-finansy_finance-data:/d alpine ls -ln /d   # store.db на месте, владелец 1000
+```
+
+`cp -a` обязателен: он сохраняет владельца (uid 1000 — пользователь `node`, под которым
+работает контейнер). Обычный `cp` отдаст файлы root, и приложение не сможет писать в базу.
+
+Дальше `git pull`, `up -d` с новым compose и проверка, что данные на месте. **Старый том
+не удаляйте сразу** — это ваша единственная резервная копия на случай, если что-то
+пошло не так; уберите его через несколько дней:
+`docker volume rm <старый-том>`.
+
 ## Хранилище: SQLite
 
 Данные лежат в `data/store.db` — SQLite через встроенный в Node.js модуль `node:sqlite`
@@ -262,7 +301,7 @@ labels:
 
 ```bash
 # Docker:
-docker run --rm -v moi-finansy_finance-data:/data -v $(pwd):/backup alpine sh -c \
+docker run --rm -v bh-finansy_finance-data:/data -v $(pwd):/backup alpine sh -c \
   "apk add --no-cache sqlite && sqlite3 /data/store.db '.backup /backup/finance-backup-$(date +%F).db'"
 
 # без Docker:
