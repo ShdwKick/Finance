@@ -1510,32 +1510,14 @@ function saveDisplayName(v){
 }
 function openProfile(){
   document.getElementById("pfName").value=state.displayName||"";
-  document.getElementById("pfPasswordBlock").style.display=(syncCapable&&token)?"":"none";
-  document.getElementById("pfCurPass").value="";
-  document.getElementById("pfNewPass").value="";
-  document.getElementById("pfNewPass2").value="";
-  document.getElementById("pfPassErr").textContent="";
+  /* Пароль и устройства живут в общем аккаунте — здесь только ссылка туда. */
+  const authBlock=document.getElementById("pfAccountBlock");
+  authBlock.style.display=(syncCapable&&authed)?"":"none";
+  if(syncCapable&&authed){
+    const u=auth&&auth.getUser();
+    document.getElementById("pfLogin").textContent=(u&&u.username)||"—";
+  }
   openScrim("profileScrim");
-}
-async function changePassword(){
-  const cur=document.getElementById("pfCurPass").value;
-  const nw=document.getElementById("pfNewPass").value;
-  const nw2=document.getElementById("pfNewPass2").value;
-  const err=document.getElementById("pfPassErr");err.textContent="";
-  if(!cur||!nw){err.textContent="Заполните оба поля пароля";return;}
-  if(nw!==nw2){err.textContent="Новые пароли не совпадают";return;}
-  if(nw.length<6){err.textContent="Новый пароль: минимум 6 символов";return;}
-  try{
-    const r=await fetch(apiBase+"/api/account/password",{method:"PUT",
-      headers:{"Content-Type":"application/json","Authorization":"Bearer "+token},
-      body:JSON.stringify({currentPassword:cur,newPassword:nw})});
-    if(r.status===401){err.textContent="Неверный текущий пароль";return;}
-    if(!r.ok){const j=await r.json().catch(()=>({}));err.textContent=j.error||"Не удалось сменить пароль";return;}
-    document.getElementById("pfCurPass").value="";
-    document.getElementById("pfNewPass").value="";
-    document.getElementById("pfNewPass2").value="";
-    snack("Пароль изменён");
-  }catch(e){err.textContent="Не удалось подключиться к серверу";}
 }
 
 /* ---------- export / import / reset ---------- */
@@ -1576,12 +1558,21 @@ applyTheme();applyHideBalanceIcon();applyDisplayName();setType("exp");render();
 if(syncCapable){
   document.getElementById("syncChip").style.display="";
   document.getElementById("logoutBtn").style.display="";
-  if(token){
-    setSync("saving");
-    pullRemote().then(ok=>{if(ok){applyTheme();applyDisplayName();render();setSync("ok");checkDuePayments();scheduleAssetPriceRefresh();}}).catch(()=>setSync("offline"));
-  }else{
-    showLogin();
-  }
+  setSync("saving");
+  /* Сначала разбираемся с авторизацией (в т.ч. с возвратом со страницы входа),
+     и только потом тянем данные — иначе первый же запрос уйдёт без токена. */
+  initAuth().then(ok=>{
+    if(!ok){setSync("offline");showLogin();return;}
+    return pullRemote().then(ok2=>{
+      if(!ok2)return;
+      applyTheme();applyDisplayName();render();setSync("ok");
+      checkDuePayments();scheduleAssetPriceRefresh();
+    });
+  }).catch(e=>{
+    console.error("Не удалось инициализировать авторизацию:",e);
+    setSync("offline");
+    if(!authed)showLogin();
+  });
 }else{
   checkDuePayments();
   scheduleAssetPriceRefresh();

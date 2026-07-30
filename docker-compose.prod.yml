@@ -20,13 +20,14 @@ services:
     environment:
       HOST: 0.0.0.0
       PORT: 8787
-      # Фронт и API — на одном домене (GitHub Pages не используется), CORS не нужен.
-      # Регистрация открыта всем — по умолчанию REGISTER_CODE не задан.
-      # Если передумаете и захотите закрыть саморегистрацию — раскомментируйте:
-      # REGISTER_CODE: замените-на-свой-секрет
-      # Для ПЕРВОГО запуска, чтобы сразу создать пользователя (на существующую базу не влияет):
-      # FIN_USER: myname
-      # FIN_PASS: my-strong-password
+      # Общий auth-сервис. ОБЯЗАТЕЛЬНО и ровно тот адрес, что задан у auth в ISSUER:
+      # он подписан внутрь токенов и сверяется побайтово. Без него сервис не стартует.
+      AUTH_ISSUER: https://auth.burninghouse.ru
+      AUTH_CLIENT_ID: finance
+      # Этот сервис должен быть зарегистрирован в auth как клиент:
+      #   docker compose exec auth node server.js client-add finance "Мои финансы" https://money.burninghouse.ru/
+      # Регистрацией и паролями заведует auth — здесь их настроек больше нет.
+      # Фронт и API — на одном домене, CORS не нужен.
     ports:
       # Только на localhost — наружу отдаёт nginx на порту 443 (см. README-deploy.md).
       - "127.0.0.1:8787:8787"

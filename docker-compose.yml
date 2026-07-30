@@ -9,14 +9,13 @@ services:
     environment:
       HOST: 0.0.0.0
       PORT: 8787
-      # Раскомментируйте для ПЕРВОГО запуска, чтобы сразу создать пользователя.
-      # На уже существующую базу эти переменные не влияют (сработает только если
-      # в базе ещё вообще нет пользователей).
-      # FIN_USER: myname
-      # FIN_PASS: my-strong-password
+      # Адрес общего auth-сервиса. Обязателен: без него сервер не стартует, потому что
+      # проверять токены нечем. Локально — см. docker-compose.dev.yml в репозитории Auth,
+      # он поднимает оба сервиса разом и всё прописывает сам.
+      AUTH_ISSUER: http://localhost:8788
+      AUTH_CLIENT_ID: finance
       # Если фронтенд отдаётся отдельно (напр. GitHub Pages), а этот контейнер — только API:
       # ALLOWED_ORIGIN: https://burning-house.online
-      # REGISTER_CODE: some-secret-invite-code
     ports:
       # По умолчанию слушаем только на localhost — наружу отдаёт nginx (см. README-deploy.md).
       # Если хотите достучаться до контейнера напрямую без nginx, поменяйте на "8787:8787".

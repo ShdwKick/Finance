@@ -290,15 +290,12 @@
     <h3>Профиль</h3>
     <div class="field"><input id="pfName" type="text" placeholder=" " maxlength="60" oninput="saveDisplayName(this.value)"><label for="pfName">Отображаемое имя (необязательно)</label></div>
 
-    <div id="pfPasswordBlock" style="display:none">
-      <div style="font-size:12px;color:var(--md-sys-color-on-surface-variant);margin-top:18px">Смена пароля</div>
-      <div class="field"><input id="pfCurPass" type="password" placeholder=" " autocomplete="current-password"><label for="pfCurPass">Текущий пароль</label></div>
-      <div class="row">
-        <div class="field"><input id="pfNewPass" type="password" placeholder=" " autocomplete="new-password"><label for="pfNewPass">Новый пароль</label></div>
-        <div class="field"><input id="pfNewPass2" type="password" placeholder=" " autocomplete="new-password"><label for="pfNewPass2">Повторите</label></div>
-      </div>
-      <div class="login-err" id="pfPassErr"></div>
-      <button class="btn tonal full" onclick="changePassword()">Сменить пароль</button>
+    <div id="pfAccountBlock" style="display:none">
+      <div style="font-size:12px;color:var(--md-sys-color-on-surface-variant);margin-top:18px">Аккаунт</div>
+      <div class="desc" style="margin-top:2px">Вы вошли как <b id="pfLogin">—</b>. Пароль, почта и список устройств — в общем аккаунте BurningHouse, он один на все сервисы.</div>
+      <button class="btn tonal full" style="margin-top:8px" onclick="openAccount()">
+        <svg class="icon sm" viewBox="0 0 24 24"><path d="M12 3l7 4v5c0 4.4-3 8.3-7 9-4-.7-7-4.6-7-9V7l7-4z"/></svg>Управление аккаунтом
+      </button>
     </div>
 
     <div style="font-size:12px;color:var(--md-sys-color-on-surface-variant);margin-top:22px;padding-top:14px;border-top:1px solid var(--md-sys-color-outline-variant)">Резервная копия</div>
@@ -679,19 +676,14 @@
   <div class="login-card">
     <div class="lg-brand"><svg class="icon" viewBox="0 0 24 24"><path d="M3 7h18v12H3z"/><path d="M3 10h18"/><circle cx="17" cy="14.5" r="1.2" fill="currentColor" stroke="none"/></svg></div>
     <h2 id="loginTitle">Мои финансы</h2>
-    <p id="loginDesc">Войдите, чтобы открыть свои данные на этом устройстве. Они синхронизируются между телефоном и ПК.</p>
-    <form id="loginForm" onsubmit="submitLoginForm();return false;">
-      <div class="field"><input id="liUser" name="username" type="text" placeholder=" " autocomplete="username"><label for="liUser">Логин</label></div>
-      <div class="field"><input id="liPass" name="password" type="password" placeholder=" " autocomplete="current-password"><label for="liPass">Пароль</label></div>
-      <div class="field" id="liPass2Field" style="display:none"><input id="liPass2" name="password2" type="password" placeholder=" " autocomplete="new-password"><label for="liPass2">Повторите пароль</label></div>
-      <div class="login-err" id="loginErr"></div>
-      <button class="btn filled full" id="loginSubmitBtn" type="submit">Войти</button>
-    </form>
-    <button class="btn text full" id="loginToggleBtn" type="button" style="margin-top:8px" onclick="toggleLoginMode()">Нет аккаунта? Зарегистрироваться</button>
+    <p id="loginDesc">Войдите через единый аккаунт BurningHouse — данные синхронизируются между телефоном и ПК.</p>
+    <div class="login-err" id="loginErr"></div>
+    <button class="btn filled full" id="loginSubmitBtn" type="button" onclick="startLogin()">Войти</button>
   </div>
 </div>
 
 <div class="snackbar" id="snack"></div>
 
+<script src="assets/auth-client.js"></script>
 <script src="assets/core.js"></script>
 <script src="assets/app.js"></script>

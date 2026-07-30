@@ -21,14 +21,16 @@ const ASSET_EMOJIS=["💰","🏦","📈","💎","🪙","🏠","🚗","💳","�
 /* ---------- sync layer (only active when served over http, not file://) ---------- */
 const syncCapable=location.protocol==="http:"||location.protocol==="https:";
 /* адрес API: пусто = тот же домен, что и сама страница (относительные запросы).
-   Задаётся вручную в форме входа, когда бэкенд живёт на другом домене (напр.
-   фронт на GitHub Pages, а API — на своём сервере) */
+   Пригодится, если бэкенд когда-нибудь переедет на отдельный домен. */
 let apiBase=localStorage.getItem("fin_api_base")||"";
 function setApiBase(v){
   apiBase=String(v||"").trim().replace(/\/+$/,"");
   if(apiBase)localStorage.setItem("fin_api_base",apiBase);else localStorage.removeItem("fin_api_base");
 }
-let token=syncCapable?localStorage.getItem("fin_token"):null;
+/* Аккаунтами заведует общий auth-сервис: логин/пароль этот проект больше не видит,
+   он только получает от него токены и шлёт их в свой /api/state. */
+let auth=null;      // клиент авторизации, создаётся в initAuth()
+let authed=false;   // есть ли действующая авторизация
 let syncTimer=null;
 
 let state=load();
@@ -69,7 +71,7 @@ function load(){
 }
 function save(){
   localStorage.setItem("myFinance",JSON.stringify(state));
-  if(syncCapable&&token){clearTimeout(syncTimer);syncTimer=setTimeout(pushRemote,700);setSync("saving");}
+  if(syncCapable&&authed){clearTimeout(syncTimer);syncTimer=setTimeout(pushRemote,700);setSync("saving");}
 }
 
 /* деньги: показываем копейки только когда они есть */
@@ -97,19 +99,48 @@ function sanitizeAmt(el){
   }
 }
 
+/* ---------- авторизация через общий сервис ---------- */
+/* Адрес auth-сервиса приходит с бэкенда (/api/config), чтобы не быть зашитым в статику.
+   Возвращает true, если авторизация есть и можно синхронизироваться. */
+async function initAuth(){
+  localStorage.removeItem("fin_token"); // ключ прежней схемы, когда токены выдавал сам Finance
+  const cfg=await (await fetch(apiBase+"/api/config")).json();
+  auth=createAuthClient({
+    authBase:cfg.authBase,
+    clientId:cfg.clientId,
+    redirectUri:location.origin+location.pathname,
+    storagePrefix:"fin"
+  });
+  /* Вернулись со страницы входа с одноразовым кодом — меняем его на токены.
+     Сам код из адресной строки убирается внутри handleRedirect. */
+  await auth.handleRedirect();
+  authed=auth.isAuthenticated();
+  return authed;
+}
+function startLogin(){
+  if(!auth){document.getElementById("loginErr").textContent="Сервер недоступен, попробуйте обновить страницу";return;}
+  auth.login();
+}
+function openAccount(){if(auth)window.open(auth.accountUrl(),"_blank","noopener");}
+
 /* ---------- server sync ---------- */
+/* auth.fetch сам подставит токен, а протухший — молча обновит и повторит запрос.
+   AuthRequiredError означает, что обновить уже нечем: пора на страницу входа. */
 async function pushRemote(){
-  if(!syncCapable||!token)return;
+  if(!syncCapable||!authed)return;
   try{
-    const r=await fetch(apiBase+"/api/state",{method:"PUT",headers:{"Content-Type":"application/json","Authorization":"Bearer "+token},body:JSON.stringify({data:state})});
-    if(r.status===401)return authFail();
+    const r=await auth.fetch(apiBase+"/api/state",{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({data:state})});
     if(!r.ok)throw 0;
     setSync("ok");
-  }catch(e){setSync("offline");}
+  }catch(e){
+    if(e&&e.name==="AuthRequiredError")return authFail();
+    setSync("offline");
+  }
 }
 async function pullRemote(){
-  const r=await fetch(apiBase+"/api/state",{headers:{"Authorization":"Bearer "+token}});
-  if(r.status===401){authFail();return false;}
+  let r;
+  try{r=await auth.fetch(apiBase+"/api/state");}
+  catch(e){if(e&&e.name==="AuthRequiredError"){authFail();return false;}throw e;}
   if(!r.ok)throw new Error("net");
   const j=await r.json();
   if(j&&j.data&&typeof j.data==="object"){state=normalize(j.data);localStorage.setItem("myFinance",JSON.stringify(state));}
@@ -121,62 +152,15 @@ function setSync(mode){
   c.className="sync"+(mode==="saving"?" saving":mode==="offline"?" offline":"");
   t.textContent=mode==="saving"?"Сохранение…":mode==="offline"?"Нет связи":"Синхронизировано";
 }
-let loginMode="login";
-function authFail(){token=null;localStorage.removeItem("fin_token");loginMode="login";showLogin();}
+function authFail(){authed=false;if(auth)auth.clearTokens();setSync("offline");showLogin();}
 function showLogin(){
-  loginMode="login";renderLoginMode();
-  document.getElementById("loginScrim").classList.add("show");
-  setTimeout(()=>document.getElementById("liUser").focus(),120);
-}
-function hideLogin(){document.getElementById("loginScrim").classList.remove("show");}
-function toggleLoginMode(){loginMode=loginMode==="login"?"register":"login";renderLoginMode();}
-function renderLoginMode(){
-  const reg=loginMode==="register";
-  document.getElementById("loginTitle").textContent=reg?"Регистрация":"Мои финансы";
-  document.getElementById("loginDesc").textContent=reg
-    ?"Придумайте логин и пароль — данные будут привязаны к аккаунту и синхронизироваться между устройствами."
-    :"Войдите, чтобы открыть свои данные на этом устройстве. Они синхронизируются между телефоном и ПК.";
-  document.getElementById("liPass2Field").style.display=reg?"":"none";
-  document.getElementById("liPass").autocomplete=reg?"new-password":"current-password";
-  document.getElementById("loginSubmitBtn").textContent=reg?"Зарегистрироваться":"Войти";
-  document.getElementById("loginToggleBtn").textContent=reg?"Уже есть аккаунт? Войти":"Нет аккаунта? Зарегистрироваться";
   document.getElementById("loginErr").textContent="";
+  document.getElementById("loginScrim").classList.add("show");
 }
-function submitLoginForm(){loginMode==="register"?doRegister():doLogin();}
-async function doLogin(){
-  const u=document.getElementById("liUser").value.trim(),p=document.getElementById("liPass").value;
-  const err=document.getElementById("loginErr");err.textContent="";
-  if(!u||!p){err.textContent="Введите логин и пароль";return;}
-  try{
-    const r=await fetch(apiBase+"/api/login",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({username:u,password:p})});
-    if(r.status===401){err.textContent="Неверный логин или пароль";return;}
-    if(!r.ok)throw 0;
-    const j=await r.json();token=j.token;localStorage.setItem("fin_token",token);
-    document.getElementById("liPass").value="";hideLogin();
-    try{await pullRemote();}catch(e){}
-    applyTheme();applyDisplayName();render();setSync("ok");snack("Добро пожаловать!");
-    checkDuePayments();
-    scheduleAssetPriceRefresh();
-  }catch(e){err.textContent="Не удалось подключиться к серверу";}
+function logout(){
+  authed=false;
+  if(auth)auth.logout();            // отзовёт токен и уведёт на выход из общего аккаунта
+  else{setSync("offline");showLogin();}
 }
-async function doRegister(){
-  const u=document.getElementById("liUser").value.trim(),p=document.getElementById("liPass").value,
-    p2=document.getElementById("liPass2").value;
-  const err=document.getElementById("loginErr");err.textContent="";
-  if(!u||!p){err.textContent="Введите логин и пароль";return;}
-  if(p!==p2){err.textContent="Пароли не совпадают";return;}
-  try{
-    const r=await fetch(apiBase+"/api/register",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({username:u,password:p})});
-    if(r.status===409){err.textContent="Такой логин уже занят";return;}
-    if(r.status===401){err.textContent="Регистрация закрыта";return;}
-    if(!r.ok){const j=await r.json().catch(()=>({}));err.textContent=j.error||"Не удалось зарегистрироваться";return;}
-    const j=await r.json();token=j.token;localStorage.setItem("fin_token",token);
-    document.getElementById("liPass").value="";document.getElementById("liPass2").value="";hideLogin();
-    applyTheme();applyDisplayName();render();setSync("ok");snack("Аккаунт создан!");
-    checkDuePayments();
-    scheduleAssetPriceRefresh();
-  }catch(e){err.textContent="Не удалось подключиться к серверу";}
-}
-function logout(){token=null;localStorage.removeItem("fin_token");setSync("offline");loginMode="login";showLogin();}
 const uid=()=>Date.now().toString(36)+Math.floor(performance.now()*1e3%1e3).toString(36)+Math.floor(Math.random()*1e6).toString(36);
 const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
