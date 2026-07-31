@@ -1517,7 +1517,9 @@ function openProfile(){
   authBlock.style.display=(syncCapable&&authed)?"":"none";
   if(syncCapable&&authed){
     const u=auth&&auth.getUser();
-    document.getElementById("pfLogin").textContent=(u&&u.username)||"—";
+    // Показываем имя, только если сам пользователь включил его показ в общем
+    // кабинете BurningHouse — иначе как и раньше логин.
+    document.getElementById("pfLogin").textContent=(u&&(u.name||u.username))||"—";
   }
   openScrim("profileScrim");
 }
