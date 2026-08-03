@@ -28,7 +28,7 @@ function setApiBase(v){
   if(apiBase)localStorage.setItem("fin_api_base",apiBase);else localStorage.removeItem("fin_api_base");
 }
 /* Аккаунтами заведует общий auth-сервис: логин/пароль этот проект больше не видит,
-   он только получает от него токены и шлёт их в свой /api/state. */
+   он только получает от него токены и шлёт их в свой /api/v1/state. */
 let auth=null;      // клиент авторизации, создаётся в initAuth()
 let authed=false;   // есть ли действующая авторизация
 let syncTimer=null;
@@ -255,11 +255,11 @@ function sanitizeAmt(el){
 }
 
 /* ---------- авторизация через общий сервис ---------- */
-/* Адрес auth-сервиса приходит с бэкенда (/api/config), чтобы не быть зашитым в статику.
+/* Адрес auth-сервиса приходит с бэкенда (/api/v1/config), чтобы не быть зашитым в статику.
    Возвращает true, если авторизация есть и можно синхронизироваться. */
 async function initAuth(){
   localStorage.removeItem("fin_token"); // ключ прежней схемы, когда токены выдавал сам Finance
-  const cfg=await (await fetch(apiBase+"/api/config")).json();
+  const cfg=await (await fetch(apiBase+"/api/v1/config")).json();
   auth=createAuthClient({
     authBase:cfg.authBase,
     clientId:cfg.clientId,
@@ -292,7 +292,7 @@ function openAccount(){if(auth)window.open(auth.accountUrl(),"_blank","noopener"
 async function pushRemote(){
   if(!syncCapable||!authed)return;
   try{
-    const r=await auth.fetch(apiBase+"/api/state",{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({data:state})});
+    const r=await auth.fetch(apiBase+"/api/v1/state",{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({data:state})});
     if(!r.ok)throw 0;
     setSync("ok");
   }catch(e){
@@ -302,7 +302,7 @@ async function pushRemote(){
 }
 async function pullRemote(){
   let r;
-  try{r=await auth.fetch(apiBase+"/api/state");}
+  try{r=await auth.fetch(apiBase+"/api/v1/state");}
   catch(e){if(e&&e.name==="AuthRequiredError"){authFail();return false;}throw e;}
   if(!r.ok)throw new Error("net");
   const j=await r.json();

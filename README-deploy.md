@@ -93,7 +93,7 @@ cd ~/finance
 sudo docker compose -f docker-compose.prod.yml pull
 sudo docker compose -f docker-compose.prod.yml up -d
 sudo docker compose -f docker-compose.prod.yml logs -f finance   # Ctrl+C выходит из просмотра, контейнер продолжает работать
-curl -s http://127.0.0.1:8787/api/health   # ожидаем {"ok":true}
+curl -s http://127.0.0.1:8787/api/v1/health   # ожидаем {"ok":true}
 ```
 
 ⚠️ **Не копируйте `docker-compose.prod.yml` поверх `docker-compose.yml`** (раньше здесь
@@ -341,7 +341,7 @@ sudo cp deploy/finance.service /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable --now finance
 sudo systemctl status finance      # active (running)
-curl -s http://127.0.0.1:8787/api/health   # {"ok":true}
+curl -s http://127.0.0.1:8787/api/v1/health   # {"ok":true}
 ```
 
 **4. DNS, сертификат, nginx** — те же шаги 5–6 из пути с Docker (проверка портов,

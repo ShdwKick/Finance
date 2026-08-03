@@ -1,16 +1,21 @@
 #!/usr/bin/env node
 /**
- * Мои финансы — backend синхронизации.
+ * Мои финансы — backend.
  * Чистый Node.js, без внешних зависимостей и без npm install
  * (SQLite — встроенный модуль node:sqlite, ничего ставить не нужно).
  *
- * Пользователями этот сервис больше не управляет: аккаунты, пароли и вход живут
+ * Пользователями этот сервис не управляет: аккаунты, пароли и вход живут
  * в общем auth-сервисе (auth.burninghouse.ru). Сюда приходит уже подписанный
  * access-токен, подпись которого проверяется ЛОКАЛЬНО по JWKS — сетевого запроса
  * в auth на каждый вызов нет, и его недоступность не роняет синхронизацию.
  *
+ * API — версионированный REST (/api/v1/...), сущности хранятся нормализованными
+ * таблицами (не одним JSON-блобом) — см. API.md. Это сделано, чтобы данными
+ * могли пользоваться не только сам фронтенд «Финансов», но и другие сервисы
+ * BurningHouse (по тому же access-токену).
+ *
  * Запуск:            node server.js
- * Список состояний:  node server.js states
+ * Список аккаунтов:  node server.js states
  *
  * Переменные окружения:
  *   PORT           (по умолчанию 8787)      — порт
@@ -34,6 +39,7 @@
 const http = require("http");
 const fs = require("fs");
 const path = require("path");
+const crypto = require("crypto");
 const { DatabaseSync } = require("node:sqlite");
 
 const PORT = parseInt(process.env.PORT || "8787", 10);
@@ -55,14 +61,104 @@ const dbIsNew = !fs.existsSync(DB_PATH);
 const db = new DatabaseSync(DB_PATH);
 db.exec("PRAGMA journal_mode = WAL"); // конкурентные чтения не блокируют запись
 db.exec(`
+  -- Нормализованные сущности (v3). Ключ — user_id (стабильный UUID из auth), не логин.
+  CREATE TABLE IF NOT EXISTS transactions (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    type TEXT NOT NULL,
+    cat TEXT NOT NULL,
+    amount REAL NOT NULL,
+    note TEXT NOT NULL DEFAULT '',
+    date TEXT NOT NULL,
+    fixed_id TEXT,
+    refund_for TEXT,
+    card_id TEXT,
+    card_repay TEXT,
+    piggy_id TEXT,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_tx_user ON transactions(user_id);
+
+  CREATE TABLE IF NOT EXISTS goals (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    name TEXT NOT NULL,
+    target REAL NOT NULL,
+    saved REAL NOT NULL DEFAULT 0,
+    emoji TEXT NOT NULL DEFAULT '🎯',
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_goals_user ON goals(user_id);
+
+  CREATE TABLE IF NOT EXISTS debts (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    kind TEXT,              -- 'card' | NULL (обычный кредит/рассрочка)
+    name TEXT NOT NULL,
+    emoji TEXT NOT NULL DEFAULT '🏦',
+    card_limit REAL,
+    used REAL,
+    total REAL,
+    remaining REAL,
+    monthly REAL,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_debts_user ON debts(user_id);
+
+  CREATE TABLE IF NOT EXISTS fixed_payments (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    name TEXT NOT NULL,
+    amount REAL NOT NULL,
+    days TEXT NOT NULL DEFAULT '[]',   -- JSON-массив чисел месяца, напр. [5,20]
+    emoji TEXT NOT NULL DEFAULT '🏠',
+    category TEXT,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_fixed_user ON fixed_payments(user_id);
+
+  CREATE TABLE IF NOT EXISTS assets (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    name TEXT NOT NULL,
+    emoji TEXT NOT NULL DEFAULT '💰',
+    amount REAL NOT NULL DEFAULT 0,
+    ticker TEXT,
+    qty REAL,
+    last_price REAL,
+    price_updated TEXT,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_assets_user ON assets(user_id);
+
+  -- Одна строка на пользователя: настройки + флаг «уже перенесён с блоба» (сама
+  -- строка и есть этот флаг — см. ensureUserMigrated).
+  CREATE TABLE IF NOT EXISTS settings (
+    user_id TEXT PRIMARY KEY,
+    monthly_income REAL,
+    theme TEXT NOT NULL DEFAULT 'light',
+    hide_balance INTEGER NOT NULL DEFAULT 0,
+    fixed_skips TEXT NOT NULL DEFAULT '[]',
+    piggy_enabled INTEGER NOT NULL DEFAULT 0,
+    piggy_mode TEXT NOT NULL DEFAULT 'smart',
+    piggy_amount REAL NOT NULL DEFAULT 0,
+    display_name TEXT NOT NULL DEFAULT '',
+    updated_at INTEGER NOT NULL DEFAULT 0
+  );
+
+  -- Более старые схемы хранения — не трогаем, они только источник для ленивой
+  -- миграции (см. ensureUserMigrated) и резервная копия на случай проблем с переездом.
   CREATE TABLE IF NOT EXISTS states_v2 (
     user_id    TEXT PRIMARY KEY,
     username   TEXT,
     data       TEXT,
     updated_at INTEGER NOT NULL DEFAULT 0
   );
-  -- Таблицы users и states остались от времён, когда сервис сам держал аккаунты.
-  -- Их не трогаем: это резервная копия на случай, если с переездом что-то пойдёт не так.
   CREATE TABLE IF NOT EXISTS users (
     username TEXT PRIMARY KEY,
     salt TEXT NOT NULL,
@@ -74,8 +170,6 @@ db.exec(`
     updated_at INTEGER NOT NULL DEFAULT 0
   );
 `);
-// Отметка о переносе строки в states_v2 — чтобы не переносить дважды и при этом
-// ничего не удалять. На свежей базе колонка уже есть, на старой добавляется здесь.
 try { db.exec("ALTER TABLE states ADD COLUMN migrated_to TEXT"); } catch { /* уже есть */ }
 
 // одноразовая миграция с самого старого формата (плоский store.json)
@@ -99,65 +193,290 @@ if (dbIsNew && fs.existsSync(OLD_JSON_STORE)) {
 }
 
 const stmt = {
-  // Ссылку на саму базу держим здесь намеренно. После инициализации `db` больше
-  // нигде в коде не упоминается, и V8 вправе выбросить эту переменную из
-  // контекста модуля — тогда финализатор DatabaseSync закроет базу, и все
-  // подготовленные запросы падают с «statement has been finalized». Поскольку
-  // stmt захвачен обработчиками запросов, база через него остаётся достижимой.
+  // Ссылку на саму базу держим здесь намеренно: после инициализации модуль
+  // больше нигде не упоминает переменную `db` напрямую, и V8 вправе выбросить
+  // её из контекста — тогда финализатор DatabaseSync закроет базу, и все
+  // подготовленные запросы начнут падать с «statement has been finalized».
+  // Раз stmt захвачен обработчиками запросов, база через него остаётся достижимой.
   db,
-  getState: db.prepare("SELECT data, updated_at FROM states_v2 WHERE user_id = ?"),
-  setState: db.prepare("INSERT INTO states_v2 (user_id, username, data, updated_at) VALUES (?, ?, ?, ?) ON CONFLICT(user_id) DO UPDATE SET username = excluded.username, data = excluded.data, updated_at = excluded.updated_at"),
-  listStates: db.prepare("SELECT user_id, username, LENGTH(data) AS size, updated_at FROM states_v2 ORDER BY updated_at DESC"),
+
+  // v3, нормализованные таблицы
+  listTx: db.prepare("SELECT * FROM transactions WHERE user_id = ? ORDER BY date DESC"),
+  getTx: db.prepare("SELECT * FROM transactions WHERE user_id = ? AND id = ?"),
+  insTx: db.prepare("INSERT INTO transactions (id,user_id,type,cat,amount,note,date,fixed_id,refund_for,card_id,card_repay,piggy_id,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)"),
+  updTx: db.prepare("UPDATE transactions SET type=?,cat=?,amount=?,note=?,date=?,fixed_id=?,refund_for=?,card_id=?,card_repay=?,piggy_id=?,updated_at=? WHERE user_id=? AND id=?"),
+  delTx: db.prepare("DELETE FROM transactions WHERE user_id = ? AND id = ?"),
+  delAllTx: db.prepare("DELETE FROM transactions WHERE user_id = ?"),
+
+  listGoals: db.prepare("SELECT * FROM goals WHERE user_id = ? ORDER BY created_at ASC"),
+  getGoal: db.prepare("SELECT * FROM goals WHERE user_id = ? AND id = ?"),
+  insGoal: db.prepare("INSERT INTO goals (id,user_id,name,target,saved,emoji,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?)"),
+  updGoal: db.prepare("UPDATE goals SET name=?,target=?,saved=?,emoji=?,updated_at=? WHERE user_id=? AND id=?"),
+  delGoal: db.prepare("DELETE FROM goals WHERE user_id = ? AND id = ?"),
+  delAllGoals: db.prepare("DELETE FROM goals WHERE user_id = ?"),
+
+  listDebts: db.prepare("SELECT * FROM debts WHERE user_id = ? ORDER BY created_at ASC"),
+  getDebt: db.prepare("SELECT * FROM debts WHERE user_id = ? AND id = ?"),
+  insDebt: db.prepare("INSERT INTO debts (id,user_id,kind,name,emoji,card_limit,used,total,remaining,monthly,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)"),
+  updDebt: db.prepare("UPDATE debts SET kind=?,name=?,emoji=?,card_limit=?,used=?,total=?,remaining=?,monthly=?,updated_at=? WHERE user_id=? AND id=?"),
+  delDebt: db.prepare("DELETE FROM debts WHERE user_id = ? AND id = ?"),
+  delAllDebts: db.prepare("DELETE FROM debts WHERE user_id = ?"),
+
+  listFixed: db.prepare("SELECT * FROM fixed_payments WHERE user_id = ? ORDER BY created_at ASC"),
+  getFixed: db.prepare("SELECT * FROM fixed_payments WHERE user_id = ? AND id = ?"),
+  insFixed: db.prepare("INSERT INTO fixed_payments (id,user_id,name,amount,days,emoji,category,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?)"),
+  updFixed: db.prepare("UPDATE fixed_payments SET name=?,amount=?,days=?,emoji=?,category=?,updated_at=? WHERE user_id=? AND id=?"),
+  delFixed: db.prepare("DELETE FROM fixed_payments WHERE user_id = ? AND id = ?"),
+  delAllFixed: db.prepare("DELETE FROM fixed_payments WHERE user_id = ?"),
+
+  listAssets: db.prepare("SELECT * FROM assets WHERE user_id = ? ORDER BY created_at ASC"),
+  getAsset: db.prepare("SELECT * FROM assets WHERE user_id = ? AND id = ?"),
+  insAsset: db.prepare("INSERT INTO assets (id,user_id,name,emoji,amount,ticker,qty,last_price,price_updated,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)"),
+  updAsset: db.prepare("UPDATE assets SET name=?,emoji=?,amount=?,ticker=?,qty=?,last_price=?,price_updated=?,updated_at=? WHERE user_id=? AND id=?"),
+  delAsset: db.prepare("DELETE FROM assets WHERE user_id = ? AND id = ?"),
+  delAllAssets: db.prepare("DELETE FROM assets WHERE user_id = ?"),
+
+  getSettings: db.prepare("SELECT * FROM settings WHERE user_id = ?"),
+  upsertSettings: db.prepare(`
+    INSERT INTO settings (user_id,monthly_income,theme,hide_balance,fixed_skips,piggy_enabled,piggy_mode,piggy_amount,display_name,updated_at)
+    VALUES (?,?,?,?,?,?,?,?,?,?)
+    ON CONFLICT(user_id) DO UPDATE SET
+      monthly_income=excluded.monthly_income, theme=excluded.theme, hide_balance=excluded.hide_balance,
+      fixed_skips=excluded.fixed_skips, piggy_enabled=excluded.piggy_enabled, piggy_mode=excluded.piggy_mode,
+      piggy_amount=excluded.piggy_amount, display_name=excluded.display_name, updated_at=excluded.updated_at
+  `),
+
+  listAccounts: db.prepare(`
+    SELECT s.user_id, s.display_name, s.updated_at,
+      (SELECT COUNT(*) FROM transactions WHERE user_id = s.user_id) AS tx_count,
+      (SELECT COUNT(*) FROM goals WHERE user_id = s.user_id) AS goals_count,
+      (SELECT COUNT(*) FROM debts WHERE user_id = s.user_id) AS debts_count,
+      (SELECT COUNT(*) FROM assets WHERE user_id = s.user_id) AS assets_count
+    FROM settings s ORDER BY s.updated_at DESC
+  `),
+
+  // v2 (переезд с username на user_id) и совсем старая v1 — только на чтение, источники миграции
+  getV2: db.prepare("SELECT data, updated_at FROM states_v2 WHERE user_id = ?"),
   legacyState: db.prepare("SELECT data, updated_at FROM states WHERE username = ? AND migrated_to IS NULL"),
   markLegacyMigrated: db.prepare("UPDATE states SET migrated_to = ? WHERE username = ? AND migrated_to IS NULL"),
-  countLegacy: db.prepare("SELECT COUNT(*) AS n FROM states WHERE migrated_to IS NULL"),
 };
 
-/**
- * Данные пользователя. Раньше строки лежали под логином — теперь под стабильным
- * user_id из auth. Переносим при первом же обращении: логин есть в токене
- * (preferred_username), так что никаких ручных маппингов и простоя не нужно.
- */
-function getState(user) {
-  const row = stmt.getState.get(user.id);
-  if (row) return { data: row.data == null ? null : JSON.parse(row.data), updatedAt: row.updated_at };
+// ---------- валидация (сервер теперь принимает запросы не только от своего фронта) ----------
+function toAmount(v) {
+  const n = typeof v === "number" ? v : (typeof v === "string" ? parseFloat(v.replace(",", ".")) : NaN);
+  if (!isFinite(n) || n < 0) return null;
+  return Math.round((n + Number.EPSILON) * 100) / 100;
+}
+function toNum(v) {
+  const n = typeof v === "number" ? v : (typeof v === "string" ? parseFloat(v.replace(",", ".")) : NaN);
+  return isFinite(n) ? n : null;
+}
+function strOrNull(v) { return typeof v === "string" && v ? v : null; }
+function strTrim(v, def) { return typeof v === "string" && v.trim() ? v.trim() : def; }
 
-  if (user.username) {
-    const old = stmt.legacyState.get(user.username);
-    if (old) {
-      stmt.setState.run(user.id, user.username, old.data, old.updated_at);
-      stmt.markLegacyMigrated.run(user.id, user.username);
-      console.log(`Данные «${user.username}» перенесены на user_id ${user.id}`);
-      return { data: old.data == null ? null : JSON.parse(old.data), updatedAt: old.updated_at };
+function validateTx(body) {
+  const errors = {};
+  const type = body.type === "exp" || body.type === "inc" ? body.type : null;
+  if (!type) errors.type = "обязателен, 'exp' или 'inc'";
+  const amount = toAmount(body.amount);
+  if (amount == null) errors.amount = "число ≥ 0";
+  const date = typeof body.date === "string" && !isNaN(Date.parse(body.date)) ? body.date : null;
+  if (!date) errors.date = "обязательна, ISO-строка даты";
+  if (Object.keys(errors).length) return { ok: false, errors };
+  return {
+    ok: true, value: {
+      type, amount, cat: strTrim(body.cat, "Другое"), note: typeof body.note === "string" ? body.note : "", date,
+      fixedId: strOrNull(body.fixedId), refundFor: strOrNull(body.refundFor),
+      cardId: strOrNull(body.cardId), cardRepay: strOrNull(body.cardRepay), piggyId: strOrNull(body.piggyId),
     }
-  }
-  return { data: null, updatedAt: 0 };
+  };
+}
+function validateGoal(body) {
+  const errors = {};
+  const target = toAmount(body.target);
+  if (target == null || target <= 0) errors.target = "число > 0";
+  if (Object.keys(errors).length) return { ok: false, errors };
+  return { ok: true, value: { target, saved: toAmount(body.saved) || 0, name: strTrim(body.name, "Без названия"), emoji: strTrim(body.emoji, "🎯") } };
+}
+function validateDebt(body) {
+  const kind = body.kind === "card" ? "card" : null;
+  const value = { kind, name: strTrim(body.name, "Без названия"), emoji: strTrim(body.emoji, kind === "card" ? "💳" : "🏦"), limit: null, used: null, total: null, remaining: null, monthly: null };
+  if (kind === "card") { value.limit = toAmount(body.limit) || 0; value.used = toAmount(body.used) || 0; }
+  else { value.total = toAmount(body.total) || 0; value.remaining = toAmount(body.remaining) || 0; value.monthly = toAmount(body.monthly) || 0; }
+  return { ok: true, value };
+}
+function validateFixed(body) {
+  const errors = {};
+  const amount = toAmount(body.amount);
+  if (amount == null || amount <= 0) errors.amount = "число > 0";
+  if (Object.keys(errors).length) return { ok: false, errors };
+  const days = Array.isArray(body.days) ? [...new Set(body.days.map(d => parseInt(d, 10)).filter(d => d >= 1 && d <= 31))].sort((a, b) => a - b) : [];
+  return { ok: true, value: { amount, days, name: strTrim(body.name, "Без названия"), emoji: strTrim(body.emoji, "🏠"), category: strOrNull(body.category) } };
+}
+function validateAsset(body) {
+  const ticker = strOrNull(body.ticker);
+  const qty = ticker ? toNum(body.qty) : null;
+  const lastPrice = ticker ? toNum(body.lastPrice) : null;
+  const priceUpdated = ticker && typeof body.priceUpdated === "string" && !isNaN(Date.parse(body.priceUpdated)) ? body.priceUpdated : null;
+  const amount = toAmount(body.amount) ?? (ticker && qty && lastPrice ? Math.round(qty * lastPrice * 100) / 100 : 0);
+  return { ok: true, value: { name: strTrim(body.name, "Без названия"), emoji: strTrim(body.emoji, "💰"), amount, ticker, qty, lastPrice, priceUpdated } };
+}
+function validateSettings(body) {
+  const piggySrc = body.piggy && typeof body.piggy === "object" ? body.piggy : {};
+  const piggyModeNum = toNum(piggySrc.mode);
+  return {
+    ok: true, value: {
+      monthlyIncome: toAmount(body.monthlyIncome),
+      theme: body.theme === "dark" ? "dark" : "light",
+      hideBalance: !!body.hideBalance,
+      fixedSkips: Array.isArray(body.fixedSkips) ? body.fixedSkips.filter(x => typeof x === "string") : [],
+      piggy: { enabled: !!piggySrc.enabled, mode: piggySrc.mode === "smart" || !(piggyModeNum > 0) ? "smart" : String(piggyModeNum), amount: toAmount(piggySrc.amount) || 0 },
+      displayName: typeof body.displayName === "string" ? body.displayName.trim().slice(0, 60) : "",
+    }
+  };
 }
 
-function setState(user, data) {
-  // Если пользователь пишет раньше, чем прочитал, — сначала доводим перенос до
-  // конца. Иначе старая строка осталась бы неперенесённой и позже подменила бы
-  // собой свежие данные.
-  if (!stmt.getState.get(user.id)) getState(user);
-  const updatedAt = Date.now();
-  stmt.setState.run(user.id, user.username || null, JSON.stringify(data), updatedAt);
-  return updatedAt;
+// ---------- преобразование строк БД <-> формы, которые ждёт клиент ----------
+function rowToTx(r) { return { id: r.id, type: r.type, cat: r.cat, amount: r.amount, note: r.note, date: r.date, fixedId: r.fixed_id, refundFor: r.refund_for, cardId: r.card_id, cardRepay: r.card_repay, piggyId: r.piggy_id }; }
+function rowToGoal(r) { return { id: r.id, name: r.name, target: r.target, saved: r.saved, emoji: r.emoji }; }
+function rowToDebt(r) {
+  const base = { id: r.id, name: r.name, emoji: r.emoji };
+  if (r.kind === "card") return { ...base, kind: "card", limit: r.card_limit, used: r.used };
+  return { ...base, total: r.total, remaining: r.remaining, monthly: r.monthly };
+}
+function rowToFixed(r) { return { id: r.id, name: r.name, amount: r.amount, days: JSON.parse(r.days || "[]"), emoji: r.emoji, category: r.category }; }
+function rowToAsset(r) { return { id: r.id, name: r.name, emoji: r.emoji, amount: r.amount, ticker: r.ticker, qty: r.qty, lastPrice: r.last_price, priceUpdated: r.price_updated }; }
+function rowToSettings(r) {
+  if (!r) return { monthlyIncome: null, theme: "light", hideBalance: false, fixedSkips: [], piggy: { enabled: false, mode: "smart", amount: 0 }, displayName: "" };
+  return { monthlyIncome: r.monthly_income, theme: r.theme, hideBalance: !!r.hide_balance, fixedSkips: JSON.parse(r.fixed_skips || "[]"), piggy: { enabled: !!r.piggy_enabled, mode: r.piggy_mode, amount: r.piggy_amount }, displayName: r.display_name };
+}
+
+// ---------- миграция блоба -> нормализованные таблицы, лениво при первом обращении ----------
+/**
+ * Данные пользователя раньше лежали одним JSON-блобом под user_id (states_v2),
+ * а до этого — под логином (states). Обе схемы остались как источники для
+ * одноразового переноса: при первом обращении конкретного user_id к любому
+ * ресурсу разбираем блоб (если он есть) на нормализованные таблицы. Наличие
+ * строки в settings — и есть отметка «уже перенесён», отдельного флага не заводим.
+ */
+function ensureUserMigrated(user) {
+  if (stmt.getSettings.get(user.id)) return;
+
+  let blob = null, updatedAt = 0;
+  const v2 = stmt.getV2.get(user.id);
+  if (v2 && v2.data) { blob = JSON.parse(v2.data); updatedAt = v2.updated_at; }
+  else if (user.username) {
+    const legacy = stmt.legacyState.get(user.username);
+    if (legacy && legacy.data) {
+      blob = JSON.parse(legacy.data); updatedAt = legacy.updated_at;
+      stmt.markLegacyMigrated.run(user.id, user.username);
+      console.log(`«${user.username}»: данные перенесены со старой таблицы states на user_id ${user.id}`);
+    }
+  }
+
+  const now = Date.now();
+  if (blob) {
+    decomposeInto(user.id, blob, now);
+    console.log(`«${user.username || user.id}»: блоб разобран на нормализованные таблицы (был обновлён ${new Date(updatedAt).toISOString()})`);
+  } else {
+    // с нуля: просто создаём пустую строку настроек — это и есть отметка «мигрирован»
+    stmt.upsertSettings.run(user.id, null, "light", 0, "[]", 0, "smart", 0, "", now);
+  }
+}
+
+/** Полная замена данных пользователя данными из блоба (формат — как в старом /api/state). Атомарно. */
+function decomposeInto(userId, data, now) {
+  now = now || Date.now();
+  data = data && typeof data === "object" ? data : {};
+  db.exec("BEGIN");
+  try {
+    stmt.delAllTx.run(userId); stmt.delAllGoals.run(userId); stmt.delAllDebts.run(userId);
+    stmt.delAllFixed.run(userId); stmt.delAllAssets.run(userId);
+
+    (Array.isArray(data.tx) ? data.tx : []).forEach(t => {
+      if (!t || !t.id) return;
+      stmt.insTx.run(String(t.id), userId, t.type === "inc" ? "inc" : "exp", strTrim(t.cat, "Другое"), toAmount(t.amount) || 0, typeof t.note === "string" ? t.note : "", typeof t.date === "string" ? t.date : new Date().toISOString(), strOrNull(t.fixedId), strOrNull(t.refundFor), strOrNull(t.cardId), strOrNull(t.cardRepay), strOrNull(t.piggyId), now, now);
+    });
+    (Array.isArray(data.goals) ? data.goals : []).forEach(g => {
+      if (!g || !g.id) return;
+      stmt.insGoal.run(String(g.id), userId, strTrim(g.name, "Без названия"), toAmount(g.target) || 0, toAmount(g.saved) || 0, strTrim(g.emoji, "🎯"), now, now);
+    });
+    (Array.isArray(data.debts) ? data.debts : []).forEach(d => {
+      if (!d || !d.id) return;
+      stmt.insDebt.run(String(d.id), userId, d.kind === "card" ? "card" : null, strTrim(d.name, "Без названия"), strTrim(d.emoji, d.kind === "card" ? "💳" : "🏦"), toAmount(d.limit), toAmount(d.used), toAmount(d.total), toAmount(d.remaining), toAmount(d.monthly), now, now);
+    });
+    (Array.isArray(data.fixed) ? data.fixed : []).forEach(f => {
+      if (!f || !f.id) return;
+      const days = Array.isArray(f.days) ? f.days.filter(d => Number.isInteger(d) && d >= 1 && d <= 31) : [];
+      stmt.insFixed.run(String(f.id), userId, strTrim(f.name, "Без названия"), toAmount(f.amount) || 0, JSON.stringify(days), strTrim(f.emoji, "🏠"), strOrNull(f.category), now, now);
+    });
+    (Array.isArray(data.assets) ? data.assets : []).forEach(a => {
+      if (!a || !a.id) return;
+      stmt.insAsset.run(String(a.id), userId, strTrim(a.name, "Без названия"), strTrim(a.emoji, "💰"), toAmount(a.amount) || 0, strOrNull(a.ticker), toNum(a.qty), toNum(a.lastPrice), strOrNull(a.priceUpdated), now, now);
+    });
+    const piggy = data.piggy && typeof data.piggy === "object" ? data.piggy : {};
+    stmt.upsertSettings.run(userId, toAmount(data.monthlyIncome), data.theme === "dark" ? "dark" : "light", data.hideBalance ? 1 : 0, JSON.stringify(Array.isArray(data.fixedSkips) ? data.fixedSkips : []), piggy.enabled ? 1 : 0, piggy.mode === "smart" ? "smart" : (toNum(piggy.mode) > 0 ? String(toNum(piggy.mode)) : "smart"), toAmount(piggy.amount) || 0, typeof data.displayName === "string" ? data.displayName.slice(0, 60) : "", now);
+
+    db.exec("COMMIT");
+  } catch (e) {
+    db.exec("ROLLBACK");
+    throw e;
+  }
+  return now;
+}
+
+/** Весь блоб пользователя, собранный из нормализованных таблиц — в форме, которую ждёт фронт. */
+function composeState(userId) {
+  const s = stmt.getSettings.get(userId);
+  return {
+    tx: stmt.listTx.all(userId).map(rowToTx),
+    goals: stmt.listGoals.all(userId).map(rowToGoal),
+    debts: stmt.listDebts.all(userId).map(rowToDebt),
+    fixed: stmt.listFixed.all(userId).map(rowToFixed),
+    assets: stmt.listAssets.all(userId).map(rowToAsset),
+    ...rowToSettings(s),
+  };
+}
+
+/**
+ * Сводка по счёту без выгрузки всех сущностей — баланс/доходы/расходы/net worth.
+ * Формулы намеренно зеркалят cashTxAmount()/render() из assets/app.js: покупка с
+ * кредитки (cardId) деньги со счёта не уводит, а её погашение (cardRepay) и
+ * пополнение копилки (piggyId) — обычные расходы по деньгам. Если эти правила
+ * поменяются на фронте — поправить и здесь.
+ */
+function computeSummary(userId) {
+  const tx = stmt.listTx.all(userId);
+  let balance = 0, incomeTotal = 0, expenseTotal = 0;
+  for (const t of tx) {
+    if (t.type === "inc") { incomeTotal += t.amount; if (!t.card_id) balance += t.amount; }
+    else { if (!t.card_repay && !t.piggy_id) expenseTotal += t.amount; if (!t.card_id) balance -= t.amount; }
+  }
+  const assetsTotal = stmt.listAssets.all(userId).reduce((s, a) => s + (a.amount || 0), 0);
+  const debtsOwed = stmt.listDebts.all(userId).reduce((s, d) => s + (d.kind === "card" ? (d.used || 0) : (d.remaining || 0)), 0);
+  const settings = stmt.getSettings.get(userId);
+  const piggyAmount = settings ? settings.piggy_amount : 0;
+  const round = n => Math.round((n + Number.EPSILON) * 100) / 100;
+  return {
+    balance: round(balance), incomeTotal: round(incomeTotal), expenseTotal: round(expenseTotal),
+    assetsTotal: round(assetsTotal), debtsOwed: round(debtsOwed), piggyAmount: round(piggyAmount),
+    netWorth: round(balance + assetsTotal + piggyAmount - debtsOwed),
+  };
 }
 
 // ---------- CLI ----------
 const [, , cmd] = process.argv;
 if (cmd === "states") {
-  const rows = stmt.listStates.all();
+  const rows = stmt.listAccounts.all();
   if (!rows.length) console.log("(пусто)");
   for (const r of rows) {
-    console.log(`${(r.username || "—").padEnd(20)}  ${r.user_id}  ${String(r.size || 0).padStart(8)} байт  ${new Date(r.updated_at).toISOString().slice(0, 19).replace("T", " ")}`);
+    const label = r.display_name || r.user_id;
+    console.log(`${label.padEnd(24)}  ${r.user_id}  tx:${r.tx_count} goals:${r.goals_count} debts:${r.debts_count} assets:${r.assets_count}  ${new Date(r.updated_at).toISOString().slice(0, 19).replace("T", " ")}`);
   }
-  const pending = stmt.countLegacy.get().n;
-  console.log(`\nЖдут переезда со старой таблицы states: ${pending}`);
   process.exit(0);
 }
 if (cmd) {
-  console.error(`Неизвестная команда: ${cmd}\n\nДоступно: states\nАккаунтами теперь заведует auth-сервис — см. там adduser/passwd/users.`);
+  console.error(`Неизвестная команда: ${cmd}\n\nДоступно: states\nАккаунтами заведует auth-сервис — см. там adduser/passwd/users.`);
   process.exit(1);
 }
 
@@ -170,17 +489,27 @@ const auth = require("./auth-client")({
   issuer: AUTH_ISSUER,
   audience: AUTH_CLIENT_ID,
   jwksUrl: process.env.AUTH_JWKS_URL,
-  // Допуск на расхождение часов, секунды. Ровно настолько же токен переживает
-  // свой exp, поэтому по умолчанию он небольшой.
   clockSkew: process.env.AUTH_CLOCK_SKEW == null ? undefined : parseInt(process.env.AUTH_CLOCK_SKEW, 10),
 });
 auth.warmup();
+
+async function requireUser(req) {
+  const user = await auth.userFromRequest(req);
+  if (!user) return null;
+  ensureUserMigrated(user);
+  return user;
+}
 
 // ---------- утилиты HTTP ----------
 function json(res, code, obj) {
   const body = JSON.stringify(obj);
   res.writeHead(code, { "Content-Type": "application/json; charset=utf-8" });
   res.end(body);
+}
+function errJson(res, code, errCode, message, fields) {
+  const error = { code: errCode, message };
+  if (fields) error.fields = fields;
+  return json(res, code, { error });
 }
 function readBody(req, limit = 8 * 1024 * 1024) {
   return new Promise((resolve, reject) => {
@@ -189,6 +518,10 @@ function readBody(req, limit = 8 * 1024 * 1024) {
     req.on("end", () => resolve(data));
     req.on("error", reject);
   });
+}
+async function readJsonBody(req) {
+  try { return { ok: true, value: JSON.parse(await readBody(req) || "{}") }; }
+  catch { return { ok: false }; }
 }
 
 function serveApp(res) {
@@ -222,47 +555,152 @@ function serveStatic(res, pathname) {
   return false;
 }
 
+// ---------- обобщённый CRUD-роут для сущностей ресурсов ----------
+/**
+ * Все пять ресурсов (transactions/goals/debts/fixed-payments/assets) устроены
+ * одинаково снаружи: GET-список, POST-создать, GET/PUT/DELETE по :id. Общая
+ * HTTP-механика вынесена сюда один раз; что у каждого ресурса своё — таблично
+ * в RESOURCES ниже (список/чтение/запись/валидация/преобразование строки).
+ */
+async function handleResourceRoute(req, res, resource, id, user) {
+  if (id == null) {
+    if (req.method === "GET") return json(res, 200, { items: resource.list(user.id).map(resource.toObj) });
+    if (req.method === "POST") {
+      const body = await readJsonBody(req);
+      if (!body.ok) return errJson(res, 400, "invalid_json", "Тело запроса — не валидный JSON");
+      const v = resource.validate(body.value);
+      if (!v.ok) return errJson(res, 422, "validation_error", "Проверьте поля запроса", v.errors);
+      const rawId = strOrNull(body.value.id);
+      const newId = rawId && !rawId.includes("/") ? rawId : crypto.randomUUID(); // с "/" ресурс стал бы недостижим по своему же URL
+      const row = resource.create(user.id, newId, v.value);
+      return json(res, 201, resource.toObj(row));
+    }
+    return errJson(res, 405, "method_not_allowed", "Метод не поддерживается для этого пути");
+  }
+  if (req.method === "GET") {
+    const row = resource.get(user.id, id);
+    return row ? json(res, 200, resource.toObj(row)) : errJson(res, 404, "not_found", "Не найдено");
+  }
+  if (req.method === "PUT") {
+    const body = await readJsonBody(req);
+    if (!body.ok) return errJson(res, 400, "invalid_json", "Тело запроса — не валидный JSON");
+    const v = resource.validate(body.value);
+    if (!v.ok) return errJson(res, 422, "validation_error", "Проверьте поля запроса", v.errors);
+    const row = resource.update(user.id, id, v.value);
+    return row ? json(res, 200, resource.toObj(row)) : errJson(res, 404, "not_found", "Не найдено");
+  }
+  if (req.method === "DELETE") {
+    const removed = resource.remove(user.id, id);
+    return removed ? json(res, 200, { ok: true }) : errJson(res, 404, "not_found", "Не найдено");
+  }
+  return errJson(res, 405, "method_not_allowed", "Метод не поддерживается для этого пути");
+}
+
+const now = () => Date.now();
+const RESOURCES = {
+  transactions: {
+    list: (uid) => stmt.listTx.all(uid), get: (uid, id) => stmt.getTx.get(uid, id), toObj: rowToTx, validate: validateTx,
+    create(uid, id, v) { stmt.insTx.run(id, uid, v.type, v.cat, v.amount, v.note, v.date, v.fixedId, v.refundFor, v.cardId, v.cardRepay, v.piggyId, now(), now()); return stmt.getTx.get(uid, id); },
+    update(uid, id, v) { if (!stmt.getTx.get(uid, id)) return null; stmt.updTx.run(v.type, v.cat, v.amount, v.note, v.date, v.fixedId, v.refundFor, v.cardId, v.cardRepay, v.piggyId, now(), uid, id); return stmt.getTx.get(uid, id); },
+    remove(uid, id) { const existed = !!stmt.getTx.get(uid, id); if (existed) stmt.delTx.run(uid, id); return existed; },
+  },
+  goals: {
+    list: (uid) => stmt.listGoals.all(uid), get: (uid, id) => stmt.getGoal.get(uid, id), toObj: rowToGoal, validate: validateGoal,
+    create(uid, id, v) { stmt.insGoal.run(id, uid, v.name, v.target, v.saved, v.emoji, now(), now()); return stmt.getGoal.get(uid, id); },
+    update(uid, id, v) { if (!stmt.getGoal.get(uid, id)) return null; stmt.updGoal.run(v.name, v.target, v.saved, v.emoji, now(), uid, id); return stmt.getGoal.get(uid, id); },
+    remove(uid, id) { const existed = !!stmt.getGoal.get(uid, id); if (existed) stmt.delGoal.run(uid, id); return existed; },
+  },
+  debts: {
+    list: (uid) => stmt.listDebts.all(uid), get: (uid, id) => stmt.getDebt.get(uid, id), toObj: rowToDebt, validate: validateDebt,
+    create(uid, id, v) { stmt.insDebt.run(id, uid, v.kind, v.name, v.emoji, v.limit, v.used, v.total, v.remaining, v.monthly, now(), now()); return stmt.getDebt.get(uid, id); },
+    update(uid, id, v) { if (!stmt.getDebt.get(uid, id)) return null; stmt.updDebt.run(v.kind, v.name, v.emoji, v.limit, v.used, v.total, v.remaining, v.monthly, now(), uid, id); return stmt.getDebt.get(uid, id); },
+    remove(uid, id) { const existed = !!stmt.getDebt.get(uid, id); if (existed) stmt.delDebt.run(uid, id); return existed; },
+  },
+  "fixed-payments": {
+    list: (uid) => stmt.listFixed.all(uid), get: (uid, id) => stmt.getFixed.get(uid, id), toObj: rowToFixed, validate: validateFixed,
+    create(uid, id, v) { stmt.insFixed.run(id, uid, v.name, v.amount, JSON.stringify(v.days), v.emoji, v.category, now(), now()); return stmt.getFixed.get(uid, id); },
+    update(uid, id, v) { if (!stmt.getFixed.get(uid, id)) return null; stmt.updFixed.run(v.name, v.amount, JSON.stringify(v.days), v.emoji, v.category, now(), uid, id); return stmt.getFixed.get(uid, id); },
+    remove(uid, id) { const existed = !!stmt.getFixed.get(uid, id); if (existed) stmt.delFixed.run(uid, id); return existed; },
+  },
+  assets: {
+    list: (uid) => stmt.listAssets.all(uid), get: (uid, id) => stmt.getAsset.get(uid, id), toObj: rowToAsset, validate: validateAsset,
+    create(uid, id, v) { stmt.insAsset.run(id, uid, v.name, v.emoji, v.amount, v.ticker, v.qty, v.lastPrice, v.priceUpdated, now(), now()); return stmt.getAsset.get(uid, id); },
+    update(uid, id, v) { if (!stmt.getAsset.get(uid, id)) return null; stmt.updAsset.run(v.name, v.emoji, v.amount, v.ticker, v.qty, v.lastPrice, v.priceUpdated, now(), uid, id); return stmt.getAsset.get(uid, id); },
+    remove(uid, id) { const existed = !!stmt.getAsset.get(uid, id); if (existed) stmt.delAsset.run(uid, id); return existed; },
+  },
+};
+
 // ---------- сервер ----------
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, "http://x");
   const p = url.pathname;
 
-  // CORS: нужен, только если фронтенд когда-нибудь будет отдаваться с другого домена.
+  // CORS: нужен, только если фронтенд отдаётся отдельно от этого сервера.
   // Без ALLOWED_ORIGIN заголовки не шлём (обычный случай — всё на одном домене).
   if (ALLOWED_ORIGIN && p.startsWith("/api/")) {
     res.setHeader("Access-Control-Allow-Origin", ALLOWED_ORIGIN);
-    res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, OPTIONS");
+    res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
     res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
     if (req.method === "OPTIONS") { res.writeHead(204); return res.end(); }
   }
 
   // Куда фронту идти за входом. Отдаём с сервера, чтобы адрес auth-сервиса
   // не был зашит в статику и менялся одной переменной окружения.
-  if (p === "/api/config") {
-    return json(res, 200, { authBase: AUTH_BASE, clientId: AUTH_CLIENT_ID });
+  if (p === "/api/v1/config") return json(res, 200, { authBase: AUTH_BASE, clientId: AUTH_CLIENT_ID });
+  if (p === "/api/v1/health") return json(res, 200, { ok: true });
+
+  // Гранулярные REST-ресурсы: /api/v1/<resource>[/<id>]
+  for (const name of Object.keys(RESOURCES)) {
+    const prefix = "/api/v1/" + name;
+    if (p === prefix || p.startsWith(prefix + "/")) {
+      const rest = p.slice(prefix.length + 1); // без ведущего слэша; "" если пути не было
+      const id = rest ? decodeURIComponent(rest) : null;
+      if (rest.includes("/")) break; // /api/v1/transactions/x/y — не наш путь, отдать 404 ниже
+      const user = await requireUser(req);
+      if (!user) return errJson(res, 401, "unauthorized", "Нужен действующий access-токен");
+      return handleResourceRoute(req, res, RESOURCES[name], id, user);
+    }
   }
 
-  // API: состояние — единственный защищённый ресурс
-  if (p === "/api/state") {
-    const user = await auth.userFromRequest(req);
-    if (!user) return json(res, 401, { error: "unauthorized" });
+  if (p === "/api/v1/settings") {
+    const user = await requireUser(req);
+    if (!user) return errJson(res, 401, "unauthorized", "Нужен действующий access-токен");
+    if (req.method === "GET") return json(res, 200, rowToSettings(stmt.getSettings.get(user.id)));
+    if (req.method === "PUT") {
+      const body = await readJsonBody(req);
+      if (!body.ok) return errJson(res, 400, "invalid_json", "Тело запроса — не валидный JSON");
+      const v = validateSettings(body.value).value;
+      const updatedAt = now();
+      stmt.upsertSettings.run(user.id, v.monthlyIncome, v.theme, v.hideBalance ? 1 : 0, JSON.stringify(v.fixedSkips), v.piggy.enabled ? 1 : 0, v.piggy.mode, v.piggy.amount, v.displayName, updatedAt);
+      return json(res, 200, rowToSettings(stmt.getSettings.get(user.id)));
+    }
+    return errJson(res, 405, "method_not_allowed", "Метод не поддерживается для этого пути");
+  }
 
+  if (p === "/api/v1/summary") {
+    const user = await requireUser(req);
+    if (!user) return errJson(res, 401, "unauthorized", "Нужен действующий access-токен");
+    if (req.method !== "GET") return errJson(res, 405, "method_not_allowed", "Метод не поддерживается для этого пути");
+    return json(res, 200, computeSummary(user.id));
+  }
+
+  // Весь блоб разом — так фронт «Финансов» продолжает синхронизироваться одним запросом,
+  // не переписываясь на гранулярные ресурсы. Под капотом — те же нормализованные таблицы.
+  if (p === "/api/v1/state") {
+    const user = await requireUser(req);
+    if (!user) return errJson(res, 401, "unauthorized", "Нужен действующий access-токен");
     if (req.method === "GET") {
-      return json(res, 200, getState(user));
+      const s = stmt.getSettings.get(user.id);
+      return json(res, 200, { data: composeState(user.id), updatedAt: s ? s.updated_at : 0 });
     }
     if (req.method === "PUT") {
-      try {
-        const body = JSON.parse(await readBody(req) || "{}");
-        if (typeof body.data !== "object" || body.data === null) return json(res, 400, { error: "no data" });
-        const updatedAt = setState(user, body.data);
-        return json(res, 200, { ok: true, updatedAt });
-      } catch { return json(res, 400, { error: "bad request" }); }
+      const body = await readJsonBody(req);
+      if (!body.ok || typeof body.value.data !== "object" || body.value.data === null) return errJson(res, 400, "invalid_body", "Ожидается {data: {...}}");
+      const updatedAt = decomposeInto(user.id, body.value.data);
+      return json(res, 200, { ok: true, updatedAt });
     }
-    return json(res, 405, { error: "method not allowed" });
+    return errJson(res, 405, "method_not_allowed", "Метод не поддерживается для этого пути");
   }
-
-  // health-check
-  if (p === "/api/health") return json(res, 200, { ok: true });
 
   // статика (css/js) и приложение (SPA-стиль fallback)
   if (req.method === "GET") {
@@ -275,6 +713,4 @@ const server = http.createServer(async (req, res) => {
 server.listen(PORT, HOST, () => {
   console.log(`Мои финансы: http://${HOST}:${PORT}  (данные: ${DB_PATH})`);
   console.log(`Авторизация: ${AUTH_ISSUER} (клиент «${AUTH_CLIENT_ID}»)`);
-  const pending = stmt.countLegacy.get().n;
-  if (pending) console.log(`Со старой схемы ещё не переехали данные ${pending} пользовател(я/ей) — перенесутся сами при их первом входе.`);
 });
