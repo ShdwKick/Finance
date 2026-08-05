@@ -172,6 +172,9 @@ db.exec(`
   );
 `);
 try { db.exec("ALTER TABLE states ADD COLUMN migrated_to TEXT"); } catch { /* уже есть */ }
+// asset_id добавлен в transactions уже после первого деплоя нормализованных таблиц — CREATE TABLE
+// IF NOT EXISTS не трогает существующую таблицу, поэтому колонку нужно добавлять отдельно
+try { db.exec("ALTER TABLE transactions ADD COLUMN asset_id TEXT"); } catch { /* уже есть */ }
 
 // одноразовая миграция с самого старого формата (плоский store.json)
 if (dbIsNew && fs.existsSync(OLD_JSON_STORE)) {
