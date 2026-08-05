@@ -290,11 +290,12 @@ function setOverviewPeriod(v){overviewPeriod=v;render();}
 /* ---------- переключатель вкладок «Обзор» / «Аналитика» ---------- */
 /* Панели не пересоздаются при переключении — только показываются/прячутся, поэтому
    render() всегда обновляет обе вкладки разом, и переключение мгновенное, без перерисовки */
+const PAGE_TABS=["overview","analytics","assets"];
 function setPageTab(tab){
-  document.getElementById("tabOverview").classList.toggle("sel",tab==="overview");
-  document.getElementById("tabAnalytics").classList.toggle("sel",tab==="analytics");
-  document.getElementById("tabPanelOverview").style.display=tab==="overview"?"":"none";
-  document.getElementById("tabPanelAnalytics").style.display=tab==="analytics"?"":"none";
+  PAGE_TABS.forEach(t=>{
+    document.getElementById("tab"+t[0].toUpperCase()+t.slice(1)).classList.toggle("sel",t===tab);
+    document.getElementById("tabPanel"+t[0].toUpperCase()+t.slice(1)).style.display=t===tab?"":"none";
+  });
 }
 
 /* ---------- render ---------- */
@@ -342,7 +343,7 @@ function render(){
 
   renderTxList();
   renderSpark();
-  renderGoals();renderAssets();renderFixed();renderDebts();renderCats();renderCatChanges();renderDynamics();
+  renderGoals();renderAssets();renderAssetsDonut();renderAssetInvested();renderFixed();renderDebts();renderCats();renderCatChanges();renderDynamics();
   updatePaySourceField(); // список кредиток в форме расхода мог измениться
   // держим открытые диалоги «показать всё» актуальными после правок, сделанных прямо из них
   refreshIfOpen("fullHistoryScrim",openFullHistory);
@@ -676,6 +677,63 @@ function renderAssets(){
   const total=state.assets.reduce((s,a)=>s+a.amount,0)+state.piggy.amount;
   sumBox.innerHTML=`<div class="sumline"><span>Итого активов</span><span class="sv">${fmt(total)}</span></div>`;
   box.innerHTML=rows.length?rows.map(assetRowHtml).join(""):empty("Ничего не найдено по этим фильтрам","M11 3a8 8 0 1 0 0 16 8 8 0 0 0 0-16z M21 21l-4.3-4.3");
+}
+/* донат «чем владею» — тот же визуальный паттерн, что у категорий расходов (renderCats),
+   но по активам: каждый сегмент — один актив (+копилка отдельной строкой, если в ней что-то есть) */
+function renderAssetsDonut(){
+  const box=document.getElementById("assetDonutBox");if(!box)return;
+  let rows=state.assets.filter(a=>a.amount>0).map(a=>[`${a.emoji} ${a.name}`,a.amount]);
+  if(state.piggy.amount>0)rows.push(["🐖 Инвесткопилка",state.piggy.amount]);
+  rows.sort((a,b)=>b[1]-a[1]);
+  const total=rows.reduce((s,r)=>s+r[1],0);
+  if(!rows.length){box.innerHTML=empty("Добавьте активы, чтобы увидеть разбивку","M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20z M12 6v6l4 2");return;}
+  if(rows.length>7){const rest=rows.slice(6).reduce((s,r)=>s+r[1],0);rows=rows.slice(0,6);rows.push(["Другое",rest]);}
+
+  const R=68,CX=86,CY=86,C=2*Math.PI*R,GAP=total?Math.min(C*0.006,3):0;
+  let off=0;
+  const segs=rows.map(([,val],i)=>{
+    const len=Math.max(0,(val/total)*C-GAP);
+    const s=`<circle cx="${CX}" cy="${CY}" r="${R}" fill="none" stroke="${CAT_COLORS[i%CAT_COLORS.length]}" stroke-width="22" stroke-dasharray="${len.toFixed(2)} ${(C-len).toFixed(2)}" stroke-dashoffset="${(-off).toFixed(2)}"/>`;
+    off+=(val/total)*C;return s;
+  }).join("");
+  const legend=rows.map(([label,val],i)=>{
+    const pct=Math.round(val/total*100);
+    return `<div class="lg"><span class="sw" style="background:${CAT_COLORS[i%CAT_COLORS.length]}"></span>
+      <span class="ln">${esc(label)}</span>
+      <span class="lv">${fmt(val)}</span><span class="lp">${pct}%</span></div>`;
+  }).join("");
+  box.innerHTML=`<div class="donut-wrap">
+    <div class="donut">
+      <svg viewBox="0 0 172 172">${segs}</svg>
+      <div class="center"><span class="t1">итого активов</span><span class="t2">${fmt(total)}</span></div>
+    </div>
+    <div class="legend">${legend}</div>
+  </div>`;
+}
+/* сколько всего переведено в актив через «Пополнить со счёта» (assetId-операции) — не то же самое,
+   что сумма, указанная при создании актива вручную, поэтому это отдельная, более узкая метрика */
+function investedInAsset(assetId){
+  return state.tx.filter(t=>t.assetId===assetId).reduce((s,t)=>s+t.amount,0);
+}
+/* «вложено vs сейчас»: только для активов, у которых есть хоть один перевод — иначе сравнивать не с чем */
+function renderAssetInvested(){
+  const box=document.getElementById("assetInvestedBox");if(!box)return;
+  const rows=state.assets.map(a=>({a,invested:investedInAsset(a.id)})).filter(r=>r.invested>0);
+  if(!rows.length){box.innerHTML=empty("Переведите деньги в актив кнопкой «Пополнить со счёта» — здесь появится сравнение с текущей стоимостью","M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20z M12 6v6l4 2");return;}
+  box.innerHTML=rows.map(({a,invested})=>{
+    const diff=Math.round((a.amount-invested)*100)/100,good=diff>=0;
+    const pct=Math.round(diff/invested*100);
+    return `<div class="mini-item" onclick="openAsset('${a.id}')" title="Открыть актив">
+      <div class="mi-row">
+        <div class="emoji">${a.emoji}</div>
+        <div class="body"><b>${esc(a.name)}</b><span>вложено ${fmt(invested)}</span></div>
+        <div class="amt">
+          <div>${fmt(a.amount)}</div>
+          <div style="font-size:12px;font-weight:600;color:${good?"var(--md-sys-color-primary)":"var(--md-sys-color-error)"}">${good?"↑":"↓"} ${fmt(Math.abs(diff))} (${good?"+":""}${pct}%)</div>
+        </div>
+      </div>
+    </div>`;
+  }).join("");
 }
 /* полный список активов по тем же фильтрам — без обрезки, в отдельном диалоге */
 function openFullAssets(){

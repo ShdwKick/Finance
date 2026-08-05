@@ -102,6 +102,7 @@
   <div class="tab-seg mini-seg" style="margin-bottom:16px">
     <button id="tabOverview" class="sel" onclick="setPageTab('overview')">Обзор</button>
     <button id="tabAnalytics" onclick="setPageTab('analytics')">Аналитика</button>
+    <button id="tabAssets" onclick="setPageTab('assets')">Активы</button>
   </div>
 
   <div class="grid" id="tabPanelOverview">
@@ -242,34 +243,6 @@
         <div id="goalList" class="scroll-thin"></div>
       </div>
 
-      <!-- Assets -->
-      <div class="panel">
-        <div class="panel-head">
-          <span class="ph-ic p"><svg class="icon sm" viewBox="0 0 24 24"><path d="M19 5c-1.5 0-2.8 1.4-3 2-3.5-1.5-11-.3-11 5 0 1.8 0 3 2 4.5V20h4v-2h3v2h4v-4c1-.5 1.7-1 2-2h2v-4h-2c0-1-.5-1.7-1-2.3V5z"/><circle cx="16" cy="10.5" r=".5" fill="currentColor" stroke="none"/></svg></span>
-          <h2>Активы и сбережения</h2>
-          <button class="icon-btn" onclick="toggleAssetFilters()" title="Поиск и фильтр" aria-label="Поиск и фильтр" style="margin-left:auto">
-            <svg class="icon sm" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-          </button>
-          <button class="icon-btn" onclick="openFullAssets()" title="Показать все активы" aria-label="Показать все активы">
-            <svg class="icon sm" viewBox="0 0 24 24"><path d="M8 3H5a2 2 0 0 0-2 2v3"/><path d="M21 8V5a2 2 0 0 0-2-2h-3"/><path d="M3 16v3a2 2 0 0 0 2 2h3"/><path d="M16 21h3a2 2 0 0 0 2-2v-3"/></svg>
-          </button>
-          <button class="icon-btn tonal" onclick="openAsset()" title="Добавить актив" aria-label="Добавить актив">
-            <svg class="icon" viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-          </button>
-        </div>
-        <div class="hist-filters" id="assetFilters" style="display:none">
-          <div class="field" style="margin-top:0"><input id="assetSearch" type="text" placeholder=" " oninput="renderAssets()"><label for="assetSearch">Поиск по названию или тикеру</label></div>
-          <div class="segmented" id="assetTypeSeg" style="margin-top:10px;margin-bottom:0">
-            <button class="sel" onclick="setAssetFilter('all',this)">Все</button>
-            <button onclick="setAssetFilter('manual',this)">Вручную</button>
-            <button onclick="setAssetFilter('moex',this)">Тикер</button>
-          </div>
-        </div>
-        <div id="assetSumline"></div>
-        <div id="piggyBox"></div>
-        <div id="assetItemsScroll" class="scroll-thin"></div>
-      </div>
-
       <!-- Debt load -->
       <div class="panel">
         <div class="panel-head">
@@ -322,6 +295,59 @@
           <h2>Динамика</h2>
         </div>
         <div id="dynamics"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== ASSETS TAB ===== -->
+  <div class="grid" id="tabPanelAssets" style="display:none">
+    <div>
+      <!-- Assets -->
+      <div class="panel">
+        <div class="panel-head">
+          <span class="ph-ic p"><svg class="icon sm" viewBox="0 0 24 24"><path d="M19 5c-1.5 0-2.8 1.4-3 2-3.5-1.5-11-.3-11 5 0 1.8 0 3 2 4.5V20h4v-2h3v2h4v-4c1-.5 1.7-1 2-2h2v-4h-2c0-1-.5-1.7-1-2.3V5z"/><circle cx="16" cy="10.5" r=".5" fill="currentColor" stroke="none"/></svg></span>
+          <h2>Активы и сбережения</h2>
+          <button class="icon-btn" onclick="toggleAssetFilters()" title="Поиск и фильтр" aria-label="Поиск и фильтр" style="margin-left:auto">
+            <svg class="icon sm" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+          </button>
+          <button class="icon-btn" onclick="openFullAssets()" title="Показать все активы" aria-label="Показать все активы">
+            <svg class="icon sm" viewBox="0 0 24 24"><path d="M8 3H5a2 2 0 0 0-2 2v3"/><path d="M21 8V5a2 2 0 0 0-2-2h-3"/><path d="M3 16v3a2 2 0 0 0 2 2h3"/><path d="M16 21h3a2 2 0 0 0 2-2v-3"/></svg>
+          </button>
+          <button class="icon-btn tonal" onclick="openAsset()" title="Добавить актив" aria-label="Добавить актив">
+            <svg class="icon" viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          </button>
+        </div>
+        <div class="hist-filters" id="assetFilters" style="display:none">
+          <div class="field" style="margin-top:0"><input id="assetSearch" type="text" placeholder=" " oninput="renderAssets()"><label for="assetSearch">Поиск по названию или тикеру</label></div>
+          <div class="segmented" id="assetTypeSeg" style="margin-top:10px;margin-bottom:0">
+            <button class="sel" onclick="setAssetFilter('all',this)">Все</button>
+            <button onclick="setAssetFilter('manual',this)">Вручную</button>
+            <button onclick="setAssetFilter('moex',this)">Тикер</button>
+          </div>
+        </div>
+        <div id="assetSumline"></div>
+        <div id="piggyBox"></div>
+        <div id="assetItemsScroll" class="scroll-thin"></div>
+      </div>
+    </div>
+    <div>
+      <!-- Asset breakdown (donut) -->
+      <div class="panel">
+        <div class="panel-head">
+          <span class="ph-ic e"><svg class="icon sm" viewBox="0 0 24 24"><path d="M21.21 15.89A10 10 0 1 1 8 2.83"/><path d="M22 12A10 10 0 0 0 12 2v10z"/></svg></span>
+          <h2>Разбивка активов</h2>
+        </div>
+        <div id="assetDonutBox"></div>
+      </div>
+
+      <!-- Invested vs current -->
+      <div class="panel">
+        <div class="panel-head">
+          <span class="ph-ic p"><svg class="icon sm" viewBox="0 0 24 24"><path d="M3 3v18h18"/><path d="M7 14l3-3 3 2 5-6"/></svg></span>
+          <h2>Вложено vs сейчас</h2>
+        </div>
+        <div class="desc" style="margin-top:-6px;margin-bottom:10px">По переводам «Пополнить со счёта» — не учитывает сумму, указанную при создании актива вручную</div>
+        <div id="assetInvestedBox"></div>
       </div>
     </div>
   </div>
