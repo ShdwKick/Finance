@@ -73,12 +73,12 @@
     </div>
 
     <div class="stat-card">
-      <div class="sc-top"><span class="sc-ic inc"><svg class="icon sm" viewBox="0 0 24 24"><line x1="7" y1="17" x2="17" y2="7"/><polyline points="8 7 17 7 17 16"/></svg></span><span class="sc-lbl">Доходы за всё время</span></div>
+      <div class="sc-top"><span class="sc-ic inc"><svg class="icon sm" viewBox="0 0 24 24"><line x1="7" y1="17" x2="17" y2="7"/><polyline points="8 7 17 7 17 16"/></svg></span><span class="sc-lbl" id="incomeLbl">Доходы за всё время</span></div>
       <div class="sc-val" id="income">0 ₽</div>
       <div class="sc-delta" id="incomeDelta"></div>
     </div>
     <div class="stat-card">
-      <div class="sc-top"><span class="sc-ic exp"><svg class="icon sm" viewBox="0 0 24 24"><line x1="7" y1="7" x2="17" y2="17"/><polyline points="17 8 17 17 8 17"/></svg></span><span class="sc-lbl">Расходы за всё время</span></div>
+      <div class="sc-top"><span class="sc-ic exp"><svg class="icon sm" viewBox="0 0 24 24"><line x1="7" y1="7" x2="17" y2="17"/><polyline points="17 8 17 17 8 17"/></svg></span><span class="sc-lbl" id="expenseLbl">Расходы за всё время</span></div>
       <div class="sc-val" id="expense">0 ₽</div>
       <div class="sc-delta" id="expenseDelta"></div>
     </div>
@@ -89,7 +89,22 @@
     </div>
   </div>
 
-  <div class="grid">
+  <div class="row overview-period-row">
+    <span class="overview-period-lbl">Доходы и расходы за:</span>
+    <select id="overviewPeriodSel" class="mini-select" onchange="setOverviewPeriod(this.value)" style="margin-left:0">
+      <option value="all" selected>Всё время</option>
+      <option value="month">Этот месяц</option>
+      <option value="prev">Прошлый месяц</option>
+      <option value="year">Этот год</option>
+    </select>
+  </div>
+
+  <div class="tab-seg mini-seg" style="margin-bottom:16px">
+    <button id="tabOverview" class="sel" onclick="setPageTab('overview')">Обзор</button>
+    <button id="tabAnalytics" onclick="setPageTab('analytics')">Аналитика</button>
+  </div>
+
+  <div class="grid" id="tabPanelOverview">
     <!-- ===== LEFT COLUMN ===== -->
     <div>
       <!-- Add operation -->
@@ -212,41 +227,6 @@
 
     <!-- ===== RIGHT COLUMN ===== -->
     <div>
-      <!-- Category breakdown (donut) -->
-      <div class="panel">
-        <div class="panel-head">
-          <span class="ph-ic e"><svg class="icon sm" viewBox="0 0 24 24"><path d="M21.21 15.89A10 10 0 1 1 8 2.83"/><path d="M22 12A10 10 0 0 0 12 2v10z"/></svg></span>
-          <h2>Аналитика</h2>
-          <select id="catsPeriodSel" class="mini-select" onchange="onCatsPeriodChange()">
-            <option value="month">Этот месяц</option>
-            <option value="prev">Прошлый месяц</option>
-            <option value="3m">3 месяца</option>
-            <option value="year">Этот год</option>
-            <option value="all">Всё время</option>
-            <option value="custom">Свой период…</option>
-          </select>
-        </div>
-        <div class="mini-seg" style="margin-bottom:14px">
-          <button id="catsTypeExp" class="sel" onclick="setCatsType('exp')">Расходы</button>
-          <button id="catsTypeInc" onclick="setCatsType('inc')">Доходы</button>
-        </div>
-        <div class="row" id="catsCustomRange" style="display:none;margin-bottom:14px">
-          <div style="flex:1"><div class="date-lbl">С</div><input type="date" id="catsFrom" class="date-input" onchange="renderCats()"></div>
-          <div style="flex:1"><div class="date-lbl">По</div><input type="date" id="catsTo" class="date-input" onchange="renderCats()"></div>
-        </div>
-        <div id="catList"></div>
-        <div id="catChanges"></div>
-      </div>
-
-      <!-- Dynamics -->
-      <div class="panel">
-        <div class="panel-head">
-          <span class="ph-ic p"><svg class="icon sm" viewBox="0 0 24 24"><path d="M3 3v18h18"/><path d="M7 14l3-3 3 2 5-6"/></svg></span>
-          <h2>Динамика</h2>
-        </div>
-        <div id="dynamics"></div>
-      </div>
-
       <!-- Goals -->
       <div class="panel">
         <div class="panel-head">
@@ -301,6 +281,47 @@
         </div>
         <div id="pdnBox"></div>
         <div id="debtList"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== ANALYTICS TAB ===== -->
+  <div class="grid" id="tabPanelAnalytics" style="display:none">
+    <div>
+      <!-- Category breakdown (donut) -->
+      <div class="panel">
+        <div class="panel-head">
+          <span class="ph-ic e"><svg class="icon sm" viewBox="0 0 24 24"><path d="M21.21 15.89A10 10 0 1 1 8 2.83"/><path d="M22 12A10 10 0 0 0 12 2v10z"/></svg></span>
+          <h2>Аналитика</h2>
+          <select id="catsPeriodSel" class="mini-select" onchange="onCatsPeriodChange()">
+            <option value="month">Этот месяц</option>
+            <option value="prev">Прошлый месяц</option>
+            <option value="3m">3 месяца</option>
+            <option value="year">Этот год</option>
+            <option value="all">Всё время</option>
+            <option value="custom">Свой период…</option>
+          </select>
+        </div>
+        <div class="mini-seg" style="margin-bottom:14px">
+          <button id="catsTypeExp" class="sel" onclick="setCatsType('exp')">Расходы</button>
+          <button id="catsTypeInc" onclick="setCatsType('inc')">Доходы</button>
+        </div>
+        <div class="row" id="catsCustomRange" style="display:none;margin-bottom:14px">
+          <div style="flex:1"><div class="date-lbl">С</div><input type="date" id="catsFrom" class="date-input" onchange="renderCats()"></div>
+          <div style="flex:1"><div class="date-lbl">По</div><input type="date" id="catsTo" class="date-input" onchange="renderCats()"></div>
+        </div>
+        <div id="catList"></div>
+        <div id="catChanges"></div>
+      </div>
+    </div>
+    <div>
+      <!-- Dynamics -->
+      <div class="panel">
+        <div class="panel-head">
+          <span class="ph-ic p"><svg class="icon sm" viewBox="0 0 24 24"><path d="M3 3v18h18"/><path d="M7 14l3-3 3 2 5-6"/></svg></span>
+          <h2>Динамика</h2>
+        </div>
+        <div id="dynamics"></div>
       </div>
     </div>
   </div>

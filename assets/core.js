@@ -5,7 +5,8 @@ const CATS={
     {n:"Продукты",e:"🛒"},{n:"Кафе и рестораны",e:"🍔"},{n:"Транспорт",e:"🚗"},
     {n:"Жильё и ЖКХ",e:"🏠"},{n:"Здоровье",e:"💊"},{n:"Одежда",e:"👕"},
     {n:"Развлечения",e:"🎮"},{n:"Связь и интернет",e:"📱"},{n:"Подписки",e:"📺"},
-    {n:"Образование",e:"📚"},{n:"Платёж по долгу",e:"🏦"},{n:"Проценты по кредиту",e:"💸"},{n:"Другое",e:"💭"}
+    {n:"Образование",e:"📚"},{n:"Платёж по долгу",e:"🏦"},{n:"Проценты по кредиту",e:"💸"},
+    {n:"Перевод в актив",e:"📥"},{n:"Другое",e:"💭"}
   ],
   inc:[
     {n:"Зарплата",e:"💼"},{n:"Подработка",e:"🛠️"},{n:"Подарок",e:"🎁"},
@@ -94,7 +95,7 @@ function normTxList(list,nowIso){
     if(typeof t.note!=="string")t.note=normStr(t.note,""); // в разметку идёт через esc, но объект дал бы «[object Object]»
     if(!dateOk(t.date))t.date=nowIso;
     // ссылки на другие сущности: либо строковый id, либо null — иначе ломаются find/findCard
-    ["refundFor","cardId","cardRepay","piggyId"].forEach(k=>{if(k in t&&typeof t[k]!=="string")t[k]=null;});
+    ["refundFor","cardId","cardRepay","piggyId","assetId"].forEach(k=>{if(k in t&&typeof t[k]!=="string")t[k]=null;});
     kept.push(t);
   });
   // возврат, привязанный к выброшенной операции, тихо съел бы свою сумму в аналитике (netTxAmount)

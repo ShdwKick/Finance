@@ -92,7 +92,7 @@ curl -X POST https://money.burninghouse.ru/api/v1/transactions \
 
 ```json
 { "id": "a1b2c3d4-…", "type": "exp", "cat": "Продукты", "amount": 450, "note": "Пятёрочка",
-  "date": "2026-08-03T12:00:00.000Z", "fixedId": null, "refundFor": null, "cardId": null, "cardRepay": null, "piggyId": null }
+  "date": "2026-08-03T12:00:00.000Z", "fixedId": null, "refundFor": null, "cardId": null, "cardRepay": null, "piggyId": null, "assetId": null }
 ```
 
 ### Что сервер НЕ делает сам
@@ -105,8 +105,10 @@ curl -X POST https://money.burninghouse.ru/api/v1/transactions \
   (ровно так же, как сейчас делает сам фронтенд «Финансов»).
 - `cat` не сверяется со списком категорий приложения — можно прислать что угодно
   непустое, интерфейс просто покажет как есть с эмодзи по умолчанию.
-- Ссылки `fixedId`/`refundFor`/`cardId`/`cardRepay`/`piggyId` не проверяются на
-  существование — висячая ссылка не вызовет ошибку ни при записи, ни при чтении.
+- Ссылки `fixedId`/`refundFor`/`cardId`/`cardRepay`/`piggyId`/`assetId` не проверяются
+  на существование — висячая ссылка не вызовет ошибку ни при записи, ни при чтении.
+- Транзакция с `assetId` **не увеличивает** `amount`/`qty` у соответствующего актива
+  в `assets` — как и с `cardId` выше, это отдельный `PUT /api/v1/assets/<id>`.
 
 Если понадобится атомарно поменять несколько сущностей разом — либо несколько
 запросов подряд (риск частичного успеха тот же, что у любого multi-request API),
@@ -189,6 +191,7 @@ curl -X POST https://money.burninghouse.ru/api/v1/transactions \
 | `cardId` | строка \| null | `null` | покупка/начисление процентов с кредитки |
 | `cardRepay` | строка \| null | `null` | id кредитки, которую гасит эта операция |
 | `piggyId` | строка \| null | `null` | авто-пополнение инвесткопилки |
+| `assetId` | строка \| null | `null` | перевод со счёта в актив (категория `"Перевод в актив"`) |
 
 ### goal
 
