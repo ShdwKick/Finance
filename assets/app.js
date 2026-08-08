@@ -19,8 +19,8 @@ function catE(type,name){return ((CATS[type]||[]).find(c=>c.n===name)||{e:"💭"
    на сумму возвратов, а сам возврат перестаёт учитываться как доход (см. netTxAmount) */
 function isRefundCat(type,cat){return type==="inc"&&cat==="Возврат";}
 function refundOptionsHtml(excludeId){
-  // погашение кредитки, копилка и перевод в актив возвратом быть не могут — это переводы, а не расходы
-  const list=state.tx.filter(t=>t.type==="exp"&&!t.cardRepay&&!t.piggyId&&!t.assetId&&t.id!==excludeId).sort((a,b)=>new Date(b.date)-new Date(a.date)).slice(0,60);
+  // погашения, копилка, перевод в актив и пополнение цели возвратом быть не могут — это переводы, а не расходы
+  const list=state.tx.filter(t=>t.type==="exp"&&!t.cardRepay&&!t.piggyId&&!t.assetId&&!t.goalId&&!t.debtRepay&&t.id!==excludeId).sort((a,b)=>new Date(b.date)-new Date(a.date)).slice(0,60);
   return '<option value="">Без привязки к конкретному расходу</option>'+
     list.map(t=>`<option value="${t.id}">${catE("exp",t.cat)} ${esc(t.note?t.note:t.cat)} — ${fmt(t.amount)} — ${fmtDate(t.date)}</option>`).join("");
 }
@@ -36,7 +36,7 @@ function refundedAmount(expenseId){
    у привязанного возврата — ноль (он уже учтён через уменьшение расхода), у погашения
    кредитки — тоже ноль (расход уже был учтён в момент покупки с карты, иначе задвоение). */
 function netTxAmount(t){
-  if(t.cardRepay||t.piggyId||t.assetId)return 0; // погашение кредитки, копилка и перевод в актив — не расходы, а переводы
+  if(t.cardRepay||t.piggyId||t.assetId||t.goalId||t.debtRepay)return 0; // переводы (погашения, копилка, перевод в актив, пополнение цели) — не расходы/доходы
   if(t.type==="exp")return Math.max(0,t.amount-refundedAmount(t.id));
   if(t.type==="inc"&&t.refundFor)return 0;
   return t.amount;
@@ -249,14 +249,23 @@ function addTx(){
 }
 function delTx(id){
   state.tx.forEach(t=>{if(t.type==="inc"&&t.refundFor===id)t.refundFor=null;});
-  // операции, связанные с кредиткой, копилкой или переводом в актив, при удалении откатывают
-  // их суммы, чтобы не разъехались цифры
+  // операции-переводы (кредитка, копилка, актив, цель, обычный кредит) при удалении откатывают
+  // связанные суммы, чтобы не разъехались цифры
   const doomed=state.tx.find(t=>t.id===id);
   if(doomed){
     const card=doomed.cardId?findCard(doomed.cardId):doomed.cardRepay?findCard(doomed.cardRepay):null;
     if(card)card.used=Math.max(0,card.used+(doomed.cardId?-doomed.amount:doomed.amount));
     if(doomed.piggyId)state.piggy.amount=Math.max(0,Math.round((state.piggy.amount-doomed.amount)*100)/100);
     if(doomed.assetId)adjustAssetByCash(state.assets.find(a=>a.id===doomed.assetId),-doomed.amount);
+    if(doomed.goalId){
+      // тип операции хранит направление (exp — пополнение, inc — снятие), откатываем в обратную сторону
+      const g=state.goals.find(x=>x.id===doomed.goalId);
+      if(g)g.saved=Math.max(0,g.saved-(doomed.type==="exp"?doomed.amount:-doomed.amount));
+    }
+    if(doomed.debtRepay){
+      const dd=state.debts.find(x=>x.id===doomed.debtRepay);
+      if(dd)dd.remaining=Math.max(0,dd.remaining+doomed.amount);
+    }
   }
   state.tx=state.tx.filter(t=>t.id!==id);
   save();render();
@@ -303,10 +312,11 @@ function render(){
   sortTx(); // страховка: порядок могли нарушить импорт бэкапа или синхронизация с сервером
   const{from:ovFrom,to:ovTo}=overviewRange();
   const inRange=t=>{const d=new Date(t.date);return d>=ovFrom&&d<ovTo;};
-  const inc=state.tx.filter(t=>t.type==="inc"&&inRange(t)).reduce((s,t)=>s+t.amount,0);
-  // в headline-карточке «Расходы» покупка с кредитки — расход, а переводы (погашение кредитки,
-  // копилка, перевод в актив) — нет: это не траты, а перекладывание своих денег / уже учтённый расход
-  const exp=state.tx.filter(t=>t.type==="exp"&&!t.cardRepay&&!t.piggyId&&!t.assetId&&inRange(t)).reduce((s,t)=>s+t.amount,0);
+  // снятие с цели (type:"inc", goalId) — тоже перевод, не доход
+  const inc=state.tx.filter(t=>t.type==="inc"&&!t.goalId&&inRange(t)).reduce((s,t)=>s+t.amount,0);
+  // в headline-карточке «Расходы» покупка с кредитки — расход, а переводы (погашения, копилка,
+  // перевод в актив, пополнение цели) — нет: это не траты, а перекладывание своих денег
+  const exp=state.tx.filter(t=>t.type==="exp"&&!t.cardRepay&&!t.piggyId&&!t.assetId&&!t.goalId&&!t.debtRepay&&inRange(t)).reduce((s,t)=>s+t.amount,0);
   document.getElementById("incomeLbl").textContent="Доходы "+OVERVIEW_PERIOD_LABEL[overviewPeriod];
   document.getElementById("expenseLbl").textContent="Расходы "+OVERVIEW_PERIOD_LABEL[overviewPeriod];
   const balance=state.tx.reduce((s,t)=>s+cashTxAmount(t),0);
@@ -382,6 +392,8 @@ function filteredTx(){
 }
 function txRowHtml(t,i){
   let sub=`${esc(t.cat)} · ${fmtDate(t.date)}`;
+  // пополнение/снятие цели — на операции любого типа (exp — положили, inc — сняли)
+  if(t.goalId){const g=state.goals.find(x=>x.id===t.goalId);if(g)sub+=` · 🎯 ${esc(g.name)}`;}
   if(t.type==="exp"){
     const r=refundedAmount(t.id);
     if(r>0)sub+=` · возвращено ${fmt(r)}`;
@@ -389,6 +401,7 @@ function txRowHtml(t,i){
     if(card)sub+=` · 💳 ${esc(card.name)}`;
     if(t.piggyId)sub+=" · 🐖 Инвесткопилка";
     if(t.assetId){const a=state.assets.find(x=>x.id===t.assetId);if(a)sub+=` · 📥 ${esc(a.name)}`;}
+    if(t.debtRepay){const dd=state.debts.find(x=>x.id===t.debtRepay);if(dd)sub+=` · 🏦 ${esc(dd.name)}`;}
   }else if(t.refundFor){
     const linked=state.tx.find(x=>x.id===t.refundFor);
     if(linked)sub=`Возврат за «${esc(linked.note||linked.cat)}» · ${fmtDate(t.date)}`;
@@ -485,12 +498,21 @@ function saveTxEdit(){
   const t=state.tx.find(x=>x.id===editTxId);if(!t)return;
   const amount=parseAmount(document.getElementById("txAmount").value);
   if(!amount||amount<=0)return snack("Введите сумму больше нуля");
-  if((t.cardId||t.cardRepay||t.piggyId||t.assetId)&&txEditType!=="exp")return snack("Операция связана с кредиткой, копилкой или активом — тип должен остаться «Расход»");
-  // правка суммы карточной/копилочной/активной операции двигает и связанную сумму, чтобы цифры не разъехались
+  if((t.cardId||t.cardRepay||t.piggyId||t.assetId||t.debtRepay)&&txEditType!=="exp")return snack("Операция связана с кредиткой, копилкой, активом или кредитом — тип должен остаться «Расход»");
+  if(t.goalId&&txEditType!==t.type)return snack("Операция связана с целью — тип менять нельзя, удалите и добавьте заново");
+  // правка суммы связанной операции двигает и привязанную сумму, чтобы цифры не разъехались
   const card=t.cardId?findCard(t.cardId):t.cardRepay?findCard(t.cardRepay):null;
   if(card&&amount!==t.amount)card.used=Math.max(0,card.used+(t.cardId?amount-t.amount:t.amount-amount));
   if(t.piggyId&&amount!==t.amount)state.piggy.amount=Math.max(0,Math.round((state.piggy.amount+amount-t.amount)*100)/100);
   if(t.assetId&&amount!==t.amount)adjustAssetByCash(state.assets.find(a=>a.id===t.assetId),amount-t.amount);
+  if(t.goalId&&amount!==t.amount){
+    const g=state.goals.find(x=>x.id===t.goalId);
+    if(g)g.saved=Math.max(0,g.saved+(t.type==="exp"?amount-t.amount:t.amount-amount));
+  }
+  if(t.debtRepay&&amount!==t.amount){
+    const dd=state.debts.find(x=>x.id===t.debtRepay);
+    if(dd)dd.remaining=Math.max(0,dd.remaining-(amount-t.amount));
+  }
   const cat=document.getElementById("txCategory").value;
   t.type=txEditType;t.amount=amount;t.cat=cat;
   t.refundFor=isRefundCat(txEditType,cat)?(document.getElementById("txRefundFor").value||null):null;
@@ -1099,7 +1121,11 @@ function confirmAmt(){
   if(!v)return snack("Введите сумму");
   if(amtMode==="goal"){
     const g=state.goals.find(x=>x.id===amtId);const was=g.saved>=g.target;
-    g.saved=Math.max(0,g.saved+v);save();closeScrim("amtScrim");render();
+    g.saved=Math.max(0,g.saved+v);
+    // пополнение цели уводит деньги со счёта (cashTxAmount), снятие возвращает — но это не расход
+    // и не доход в аналитике (netTxAmount=0): деньги просто переложены, а не потрачены/заработаны
+    state.tx.unshift({id:uid(),type:v>0?"exp":"inc",amount:Math.abs(v),cat:"Другое",note:(v>0?"Пополнение цели · ":"Снятие с цели · ")+g.name,date:new Date().toISOString(),goalId:g.id});
+    save();closeScrim("amtScrim");render();
     if(!was&&g.saved>=g.target){celebrate();snack("Цель достигнута! 🎉");}else snack(v>0?"Цель пополнена":"Сумма снята");
   }else if(amtMode==="cardRepay"){
     const d=state.debts.find(x=>x.id===amtId);
@@ -1121,7 +1147,12 @@ function confirmAmt(){
     snack("Актив пополнен");
   }else{
     const d=state.debts.find(x=>x.id===amtId);const was=d.remaining<=0;
-    d.remaining=Math.max(0,d.remaining-Math.abs(v));save();closeScrim("amtScrim");render();
+    const pay=Math.abs(v);
+    d.remaining=Math.max(0,d.remaining-pay);
+    // платёж по обычному кредиту — реальный уход денег со счёта, но не расход в аналитике
+    // (netTxAmount=0), как и погашение кредитки/перевод в актив выше
+    state.tx.unshift({id:uid(),type:"exp",amount:pay,cat:"Платёж по долгу",note:"Платёж · "+d.name,date:new Date().toISOString(),debtRepay:d.id});
+    save();closeScrim("amtScrim");render();
     if(!was&&d.remaining<=0){celebrate();snack("Долг погашен! 🎉");}else snack("Платёж внесён");
   }
 }

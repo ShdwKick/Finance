@@ -95,7 +95,7 @@ function normTxList(list,nowIso){
     if(typeof t.note!=="string")t.note=normStr(t.note,""); // в разметку идёт через esc, но объект дал бы «[object Object]»
     if(!dateOk(t.date))t.date=nowIso;
     // ссылки на другие сущности: либо строковый id, либо null — иначе ломаются find/findCard
-    ["refundFor","cardId","cardRepay","piggyId","assetId"].forEach(k=>{if(k in t&&typeof t[k]!=="string")t[k]=null;});
+    ["refundFor","cardId","cardRepay","piggyId","assetId","goalId","debtRepay"].forEach(k=>{if(k in t&&typeof t[k]!=="string")t[k]=null;});
     kept.push(t);
   });
   // возврат, привязанный к выброшенной операции, тихо съел бы свою сумму в аналитике (netTxAmount)
