@@ -114,6 +114,36 @@ function adjustAssetByCash(a,delta){
     a.amount=Math.max(0,Math.round(((a.amount||0)+delta)*100)/100);
   }
 }
+/* создаёт операцию-перевод в актив: списывает деньги со счёта (или с указанной кредитки) —
+   либо по сумме в рублях, либо (для тикерных активов) по точному количеству бумаг. Общий код
+   для кнопки «Пополнить» и для чекбокса «Списать со счёта» при создании нового актива.
+   Количество запоминаем в операции отдельным полем (assetQty) — иначе при откате (delTx/
+   saveTxEdit) пришлось бы пересчитывать qty обратно через ТЕКУЩУЮ lastPrice, которая к тому
+   моменту может уже уехать от цены на момент перевода, и количество бумаг разъехалось бы. */
+function recordAssetTransfer(a,{amount,qty,cardId}={}){
+  let cash,assetQty=null;
+  if(qty!=null){
+    assetQty=Math.round(qty*1e6)/1e6;
+    cash=Math.round(qty*(a.lastPrice||0)*100)/100;
+    a.qty=Math.max(0,(a.qty||0)+qty);
+    a.amount=Math.round(a.qty*(a.lastPrice||0)*100)/100;
+  }else{
+    cash=amount;
+    if(a.ticker&&a.lastPrice>0){
+      assetQty=Math.round((amount/a.lastPrice)*1e6)/1e6;
+      a.qty=Math.max(0,(a.qty||0)+amount/a.lastPrice);
+      a.amount=Math.round(a.qty*a.lastPrice*100)/100;
+    }else{
+      a.amount=Math.max(0,Math.round(((a.amount||0)+amount)*100)/100);
+    }
+  }
+  const tx={id:uid(),type:"exp",amount:cash,cat:"Перевод в актив",note:"Перевод · "+a.name,date:new Date().toISOString(),assetId:a.id};
+  if(assetQty!=null)tx.assetQty=assetQty;
+  const card=cardId?findCard(cardId):null;
+  if(card){tx.cardId=card.id;card.used+=cash;}
+  state.tx.unshift(tx);
+  return cash;
+}
 
 /* ---------- калькулятор для полей суммы ---------- */
 let calcExpr="",calcTarget=null;
@@ -256,7 +286,15 @@ function delTx(id){
     const card=doomed.cardId?findCard(doomed.cardId):doomed.cardRepay?findCard(doomed.cardRepay):null;
     if(card)card.used=Math.max(0,card.used+(doomed.cardId?-doomed.amount:doomed.amount));
     if(doomed.piggyId)state.piggy.amount=Math.max(0,Math.round((state.piggy.amount-doomed.amount)*100)/100);
-    if(doomed.assetId)adjustAssetByCash(state.assets.find(a=>a.id===doomed.assetId),-doomed.amount);
+    if(doomed.assetId){
+      const a=state.assets.find(x=>x.id===doomed.assetId);
+      if(a){
+        // если операция хранит точное количество бумаг (assetQty) — откатываем по нему, а не
+        // по сумме: lastPrice к моменту удаления мог уже уехать от цены на момент перевода
+        if(doomed.assetQty!=null){a.qty=Math.max(0,(a.qty||0)-doomed.assetQty);a.amount=Math.round(a.qty*(a.lastPrice||0)*100)/100;}
+        else adjustAssetByCash(a,-doomed.amount);
+      }
+    }
     if(doomed.goalId){
       // тип операции хранит направление (exp — пополнение, inc — снятие), откатываем в обратную сторону
       const g=state.goals.find(x=>x.id===doomed.goalId);
@@ -504,6 +542,7 @@ function saveTxEdit(){
   const card=t.cardId?findCard(t.cardId):t.cardRepay?findCard(t.cardRepay):null;
   if(card&&amount!==t.amount)card.used=Math.max(0,card.used+(t.cardId?amount-t.amount:t.amount-amount));
   if(t.piggyId&&amount!==t.amount)state.piggy.amount=Math.max(0,Math.round((state.piggy.amount+amount-t.amount)*100)/100);
+  if(t.assetQty!=null&&amount!==t.amount)return snack("Эта операция указана в штуках бумаг — чтобы поправить сумму, удалите её и добавьте заново");
   if(t.assetId&&amount!==t.amount)adjustAssetByCash(state.assets.find(a=>a.id===t.assetId),amount-t.amount);
   if(t.goalId&&amount!==t.amount){
     const g=state.goals.find(x=>x.id===t.goalId);
@@ -787,6 +826,10 @@ function openAsset(id){
   selEmoji=a?a.emoji:"💰";
   renderEmojis("aEmoji",ASSET_EMOJIS);
   document.getElementById("assetDelBtn").style.display=a?"":"none";
+  // списание со счёта имеет смысл только при СОЗДАНИИ актива — при редактировании сумма
+  // меняется напрямую, отдельного «перевода» это не порождает
+  document.getElementById("assetChargeBlock").style.display=a?"none":"";
+  setAssetCharge(false);
   const kind=a&&a.ticker?"moex":"manual";
   const btns=document.getElementById("assetKindSeg").querySelectorAll("button");
   setAssetKind(kind,kind==="moex"?btns[1]:btns[0]);
@@ -875,7 +918,22 @@ function onTickerBlur(){
   if(lastFetchedPrice&&lastFetchedPrice.ticker===ticker)return; // уже получали для этого тикера
   refreshAssetPrice(true);
 }
+let assetCharge=false;
+function setAssetCharge(v){
+  assetCharge=v;
+  document.getElementById("assetChargeOff").classList.toggle("sel",!v);
+  document.getElementById("assetChargeOn").classList.toggle("sel",v);
+  document.getElementById("assetChargeSourceField").style.display=v?"":"none";
+  if(!v)return;
+  const cards=state.debts.filter(d=>d.kind==="card");
+  const sel=document.getElementById("assetChargeSource");
+  const cur=sel.value;
+  sel.innerHTML='<option value="">Со счёта</option>'+cards.map(d=>`<option value="${d.id}">💳 ${esc(d.name)}</option>`).join("");
+  if([...sel.options].some(o=>o.value===cur))sel.value=cur;
+}
 async function saveAsset(){
+  const wasNew=!editId;
+  const chargeCardId=assetCharge?(document.getElementById("assetChargeSource").value||null):null;
   if(assetKind==="moex"){
     const ticker=document.getElementById("aTicker").value.trim().toUpperCase();
     const qty=parseAmount(document.getElementById("aQty").value);
@@ -895,25 +953,39 @@ async function saveAsset(){
     // уже есть актив с таким же тикером (кроме текущего редактируемого) — не дублируем, а суммируем количество
     const dup=state.assets.find(x=>x.ticker===ticker&&x.id!==editId);
     if(dup){
-      dup.qty=(dup.qty||0)+qty;
-      dup.lastPrice=lastPrice;dup.priceUpdated=priceUpdated;
-      dup.amount=dup.qty*lastPrice;
+      dup.lastPrice=lastPrice;dup.priceUpdated=priceUpdated; // цену обновляем ДО перевода, чтобы сумма списания считалась по свежему курсу
       if(editId)state.assets=state.assets.filter(x=>x.id!==editId); // слили в dup, отдельную запись убираем
+      if(wasNew&&assetCharge)recordAssetTransfer(dup,{qty,cardId:chargeCardId});
+      else{dup.qty=(dup.qty||0)+qty;dup.amount=dup.qty*lastPrice;}
       save();closeScrim("assetScrim");render();
       snack(`Добавлено к «${dup.name}» — теперь ${dup.qty} шт.`);
       return;
     }
-    const data={name,amount:qty*lastPrice,emoji:selEmoji,ticker,qty,lastPrice,priceUpdated};
-    if(editId)Object.assign(state.assets.find(x=>x.id===editId),data);
-    else state.assets.push({id:uid(),...data});
+    if(wasNew&&assetCharge){
+      // создаём с нулевым количеством и сразу переводим нужное — recordAssetTransfer прибавляет
+      // дельту, так что стартовать нужно именно с нуля, иначе количество задвоится
+      const a={id:uid(),name,amount:0,emoji:selEmoji,ticker,qty:0,lastPrice,priceUpdated};
+      state.assets.push(a);
+      recordAssetTransfer(a,{qty,cardId:chargeCardId});
+    }else{
+      const data={name,amount:qty*lastPrice,emoji:selEmoji,ticker,qty,lastPrice,priceUpdated};
+      if(editId)Object.assign(state.assets.find(x=>x.id===editId),data);
+      else state.assets.push({id:uid(),...data});
+    }
   }else{
     const name=document.getElementById("aName").value.trim();
     if(!name)return snack("Введите название");
     const amount=parseAmount(document.getElementById("aAmount").value);
     if(isNaN(amount)||amount<0)return snack("Введите сумму");
-    const data={name,amount,emoji:selEmoji,ticker:null,qty:null,lastPrice:null,priceUpdated:null};
-    if(editId)Object.assign(state.assets.find(x=>x.id===editId),data);
-    else state.assets.push({id:uid(),...data});
+    if(wasNew&&assetCharge&&amount>0){
+      const a={id:uid(),name,amount:0,emoji:selEmoji,ticker:null,qty:null,lastPrice:null,priceUpdated:null};
+      state.assets.push(a);
+      recordAssetTransfer(a,{amount,cardId:chargeCardId});
+    }else{
+      const data={name,amount,emoji:selEmoji,ticker:null,qty:null,lastPrice:null,priceUpdated:null};
+      if(editId)Object.assign(state.assets.find(x=>x.id===editId),data);
+      else state.assets.push({id:uid(),...data});
+    }
   }
   save();closeScrim("assetScrim");render();snack("Актив сохранён");
 }
@@ -1106,15 +1178,24 @@ function openAmt(mode,id){
     const a=state.assets.find(x=>x.id===id);
     document.getElementById("amtTitle").textContent="Перевести в актив";
     document.getElementById("amtDesc").textContent=a.emoji+" "+a.name+" — сейчас "+fmt(a.amount);
-    document.getElementById("amtLabel").textContent="Сумма перевода со счёта, ₽";
+    document.getElementById("amtAssetModeSeg").style.display=a.ticker?"":"none";
+    setAmtAssetMode("sum");
   }else{
     const d=state.debts.find(x=>x.id===id);
     document.getElementById("amtTitle").textContent="Внести платёж";
     document.getElementById("amtDesc").textContent=d.emoji+" "+d.name+" — осталось "+fmt(d.remaining);
     document.getElementById("amtLabel").textContent="Сумма платежа, ₽";
   }
+  if(mode!=="asset")document.getElementById("amtAssetModeSeg").style.display="none";
   document.getElementById("amtValue").value="";
   openScrim("amtScrim");setTimeout(()=>document.getElementById("amtValue").focus(),90);
+}
+let amtAssetMode="sum";
+function setAmtAssetMode(m){
+  amtAssetMode=m;
+  document.getElementById("amtModeSum").classList.toggle("sel",m==="sum");
+  document.getElementById("amtModeQty").classList.toggle("sel",m==="qty");
+  document.getElementById("amtLabel").textContent=m==="qty"?"Количество бумаг":"Сумма перевода со счёта, ₽";
 }
 function confirmAmt(){
   const v=parseAmount(document.getElementById("amtValue").value);
@@ -1138,11 +1219,9 @@ function confirmAmt(){
     if(d.used<=0){celebrate();snack("Кредитка погашена! 🎉");}else snack("Погашение внесено");
   }else if(amtMode==="asset"){
     const a=state.assets.find(x=>x.id===amtId);
-    const pay=Math.abs(v);
-    adjustAssetByCash(a,pay);
     // перевод — реальный уход денег со счёта (cashTxAmount), но НЕ расход в аналитике (netTxAmount=0):
-    // деньги просто переложены в актив, а не потрачены
-    state.tx.unshift({id:uid(),type:"exp",amount:pay,cat:"Перевод в актив",note:"Перевод · "+a.name,date:new Date().toISOString(),assetId:a.id});
+    // деньги просто переложены в актив, а не потрачены. По количеству бумаг — только у тикерных активов
+    recordAssetTransfer(a,amtAssetMode==="qty"?{qty:Math.abs(v)}:{amount:Math.abs(v)});
     save();closeScrim("amtScrim");render();
     snack("Актив пополнен");
   }else{

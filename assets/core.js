@@ -96,6 +96,8 @@ function normTxList(list,nowIso){
     if(!dateOk(t.date))t.date=nowIso;
     // ссылки на другие сущности: либо строковый id, либо null — иначе ломаются find/findCard
     ["refundFor","cardId","cardRepay","piggyId","assetId","goalId","debtRepay"].forEach(k=>{if(k in t&&typeof t[k]!=="string")t[k]=null;});
+    // assetQty — не ссылка, а число (штук бумаг); null, если отсутствует или некорректно
+    if("assetQty" in t){const q=normNum(t.assetQty);t.assetQty=q>0?q:null;}
     kept.push(t);
   });
   // возврат, привязанный к выброшенной операции, тихо съел бы свою сумму в аналитике (netTxAmount)

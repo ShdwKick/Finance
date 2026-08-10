@@ -78,6 +78,7 @@ db.exec(`
     asset_id TEXT,
     goal_id TEXT,
     debt_repay TEXT,
+    asset_qty REAL,
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL
   );
@@ -181,6 +182,7 @@ try { db.exec("ALTER TABLE states ADD COLUMN migrated_to TEXT"); } catch { /* у
 try { db.exec("ALTER TABLE transactions ADD COLUMN asset_id TEXT"); } catch { /* уже есть */ }
 try { db.exec("ALTER TABLE transactions ADD COLUMN goal_id TEXT"); } catch { /* уже есть */ }
 try { db.exec("ALTER TABLE transactions ADD COLUMN debt_repay TEXT"); } catch { /* уже есть */ }
+try { db.exec("ALTER TABLE transactions ADD COLUMN asset_qty REAL"); } catch { /* уже есть */ }
 
 // одноразовая миграция с самого старого формата (плоский store.json)
 if (dbIsNew && fs.existsSync(OLD_JSON_STORE)) {
@@ -213,8 +215,8 @@ const stmt = {
   // v3, нормализованные таблицы
   listTx: db.prepare("SELECT * FROM transactions WHERE user_id = ? ORDER BY date DESC"),
   getTx: db.prepare("SELECT * FROM transactions WHERE user_id = ? AND id = ?"),
-  insTx: db.prepare("INSERT INTO transactions (id,user_id,type,cat,amount,note,date,fixed_id,refund_for,card_id,card_repay,piggy_id,asset_id,goal_id,debt_repay,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"),
-  updTx: db.prepare("UPDATE transactions SET type=?,cat=?,amount=?,note=?,date=?,fixed_id=?,refund_for=?,card_id=?,card_repay=?,piggy_id=?,asset_id=?,goal_id=?,debt_repay=?,updated_at=? WHERE user_id=? AND id=?"),
+  insTx: db.prepare("INSERT INTO transactions (id,user_id,type,cat,amount,note,date,fixed_id,refund_for,card_id,card_repay,piggy_id,asset_id,goal_id,debt_repay,asset_qty,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"),
+  updTx: db.prepare("UPDATE transactions SET type=?,cat=?,amount=?,note=?,date=?,fixed_id=?,refund_for=?,card_id=?,card_repay=?,piggy_id=?,asset_id=?,goal_id=?,debt_repay=?,asset_qty=?,updated_at=? WHERE user_id=? AND id=?"),
   delTx: db.prepare("DELETE FROM transactions WHERE user_id = ? AND id = ?"),
   delAllTx: db.prepare("DELETE FROM transactions WHERE user_id = ?"),
 
@@ -299,6 +301,7 @@ function validateTx(body) {
       fixedId: strOrNull(body.fixedId), refundFor: strOrNull(body.refundFor),
       cardId: strOrNull(body.cardId), cardRepay: strOrNull(body.cardRepay), piggyId: strOrNull(body.piggyId),
       assetId: strOrNull(body.assetId), goalId: strOrNull(body.goalId), debtRepay: strOrNull(body.debtRepay),
+      assetQty: (() => { const q = toNum(body.assetQty); return q != null && q > 0 ? q : null; })(),
     }
   };
 }
@@ -348,7 +351,7 @@ function validateSettings(body) {
 }
 
 // ---------- преобразование строк БД <-> формы, которые ждёт клиент ----------
-function rowToTx(r) { return { id: r.id, type: r.type, cat: r.cat, amount: r.amount, note: r.note, date: r.date, fixedId: r.fixed_id, refundFor: r.refund_for, cardId: r.card_id, cardRepay: r.card_repay, piggyId: r.piggy_id, assetId: r.asset_id, goalId: r.goal_id, debtRepay: r.debt_repay }; }
+function rowToTx(r) { return { id: r.id, type: r.type, cat: r.cat, amount: r.amount, note: r.note, date: r.date, fixedId: r.fixed_id, refundFor: r.refund_for, cardId: r.card_id, cardRepay: r.card_repay, piggyId: r.piggy_id, assetId: r.asset_id, goalId: r.goal_id, debtRepay: r.debt_repay, assetQty: r.asset_qty }; }
 function rowToGoal(r) { return { id: r.id, name: r.name, target: r.target, saved: r.saved, emoji: r.emoji }; }
 function rowToDebt(r) {
   const base = { id: r.id, name: r.name, emoji: r.emoji };
@@ -406,7 +409,8 @@ function decomposeInto(userId, data, now) {
 
     (Array.isArray(data.tx) ? data.tx : []).forEach(t => {
       if (!t || !t.id) return;
-      stmt.insTx.run(String(t.id), userId, t.type === "inc" ? "inc" : "exp", strTrim(t.cat, "Другое"), toAmount(t.amount) || 0, typeof t.note === "string" ? t.note : "", typeof t.date === "string" ? t.date : new Date().toISOString(), strOrNull(t.fixedId), strOrNull(t.refundFor), strOrNull(t.cardId), strOrNull(t.cardRepay), strOrNull(t.piggyId), strOrNull(t.assetId), strOrNull(t.goalId), strOrNull(t.debtRepay), now, now);
+      const assetQty = (() => { const q = toNum(t.assetQty); return q != null && q > 0 ? q : null; })();
+      stmt.insTx.run(String(t.id), userId, t.type === "inc" ? "inc" : "exp", strTrim(t.cat, "Другое"), toAmount(t.amount) || 0, typeof t.note === "string" ? t.note : "", typeof t.date === "string" ? t.date : new Date().toISOString(), strOrNull(t.fixedId), strOrNull(t.refundFor), strOrNull(t.cardId), strOrNull(t.cardRepay), strOrNull(t.piggyId), strOrNull(t.assetId), strOrNull(t.goalId), strOrNull(t.debtRepay), assetQty, now, now);
     });
     (Array.isArray(data.goals) ? data.goals : []).forEach(g => {
       if (!g || !g.id) return;
@@ -613,8 +617,8 @@ const now = () => Date.now();
 const RESOURCES = {
   transactions: {
     list: (uid) => stmt.listTx.all(uid), get: (uid, id) => stmt.getTx.get(uid, id), toObj: rowToTx, validate: validateTx,
-    create(uid, id, v) { stmt.insTx.run(id, uid, v.type, v.cat, v.amount, v.note, v.date, v.fixedId, v.refundFor, v.cardId, v.cardRepay, v.piggyId, v.assetId, v.goalId, v.debtRepay, now(), now()); return stmt.getTx.get(uid, id); },
-    update(uid, id, v) { if (!stmt.getTx.get(uid, id)) return null; stmt.updTx.run(v.type, v.cat, v.amount, v.note, v.date, v.fixedId, v.refundFor, v.cardId, v.cardRepay, v.piggyId, v.assetId, v.goalId, v.debtRepay, now(), uid, id); return stmt.getTx.get(uid, id); },
+    create(uid, id, v) { stmt.insTx.run(id, uid, v.type, v.cat, v.amount, v.note, v.date, v.fixedId, v.refundFor, v.cardId, v.cardRepay, v.piggyId, v.assetId, v.goalId, v.debtRepay, v.assetQty, now(), now()); return stmt.getTx.get(uid, id); },
+    update(uid, id, v) { if (!stmt.getTx.get(uid, id)) return null; stmt.updTx.run(v.type, v.cat, v.amount, v.note, v.date, v.fixedId, v.refundFor, v.cardId, v.cardRepay, v.piggyId, v.assetId, v.goalId, v.debtRepay, v.assetQty, now(), uid, id); return stmt.getTx.get(uid, id); },
     remove(uid, id) { const existed = !!stmt.getTx.get(uid, id); if (existed) stmt.delTx.run(uid, id); return existed; },
   },
   goals: {

@@ -496,6 +496,10 @@
   <div class="dialog">
     <h3 id="amtTitle"></h3>
     <div class="desc" id="amtDesc"></div>
+    <div class="segmented" id="amtAssetModeSeg" style="display:none">
+      <button id="amtModeSum" class="sel" onclick="setAmtAssetMode('sum')">По сумме</button>
+      <button id="amtModeQty" onclick="setAmtAssetMode('qty')">По количеству бумаг</button>
+    </div>
     <div class="field"><input id="amtValue" type="text" inputmode="decimal" placeholder=" " oninput="sanitizeAmt(this)"><label for="amtValue" id="amtLabel">Сумма, ₽</label></div>
     <div class="actions">
       <button class="btn text" onclick="closeScrim('amtScrim')">Отмена</button>
@@ -530,6 +534,18 @@
       <div class="asset-price-row">
         <span id="assetPriceInfo">Курс ещё не загружен</span>
         <button class="btn text" style="height:34px;padding:0 12px" onclick="refreshAssetPrice()">Обновить курс</button>
+      </div>
+    </div>
+
+    <div id="assetChargeBlock">
+      <div class="segmented" id="assetChargeSeg" style="margin-top:14px">
+        <button id="assetChargeOff" class="sel" onclick="setAssetCharge(false)">Не списывать со счёта</button>
+        <button id="assetChargeOn" onclick="setAssetCharge(true)">Списать со счёта</button>
+      </div>
+      <div class="field filled" id="assetChargeSourceField" style="display:none">
+        <select id="assetChargeSource"></select>
+        <svg class="chev icon sm" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"/></svg>
+        <label>Списать откуда</label>
       </div>
     </div>
 
