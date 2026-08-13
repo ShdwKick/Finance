@@ -150,8 +150,6 @@ function normDebtList(list){
       const rate=normNum(d.rate);d.rate=rate>0?rate:null; // ставка % годовых, null = неизвестна
       d.startDate=dateOk(d.startDate)?d.startDate:null;
       const day=normNum(d.paymentDay);d.paymentDay=day>=1&&day<=31?Math.round(day):null;
-      d.notifyEmail=!!d.notifyEmail;
-      const notifyDays=normNum(d.notifyDaysBefore);d.notifyDaysBefore=notifyDays>=0?Math.round(notifyDays):3;
     }
     kept.push(d);
   });
@@ -226,6 +224,7 @@ function normalize(s){
     ?{enabled:!!s.piggy.enabled,mode:normPiggyMode(s.piggy.mode),amount:Math.max(0,normAmount(s.piggy.amount)||0)}
     :{enabled:false,mode:"smart",amount:0};
   s.displayName=typeof s.displayName==="string"?s.displayName.trim().slice(0,60):"";
+  s.onboardingDone=!!s.onboardingDone;
   return s;
 }
 function load(){

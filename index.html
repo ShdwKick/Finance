@@ -109,7 +109,7 @@
     <!-- ===== LEFT COLUMN ===== -->
     <div>
       <!-- Add operation -->
-      <div class="panel">
+      <div class="panel" id="onbAddPanel">
         <div class="panel-head">
           <span class="ph-ic p"><svg class="icon sm" viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg></span>
           <h2>Новая операция</h2></div>
@@ -181,7 +181,7 @@
       </div>
 
       <!-- History -->
-      <div class="panel">
+      <div class="panel" id="onbHistoryPanel">
         <div class="panel-head">
           <span class="ph-ic s"><svg class="icon sm" viewBox="0 0 24 24"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg></span>
           <h2>История</h2><span class="count" id="txCount"></span>
@@ -229,7 +229,7 @@
     <!-- ===== RIGHT COLUMN ===== -->
     <div>
       <!-- Goals -->
-      <div class="panel">
+      <div class="panel" id="onbGoalsPanel">
         <div class="panel-head">
           <span class="ph-ic t"><svg class="icon sm" viewBox="0 0 24 24"><polygon points="12 2 15 9 22 9 16.5 13.5 18.5 21 12 16.5 5.5 21 7.5 13.5 2 9 9 9"/></svg></span>
           <h2>Цели</h2><span class="count" id="goalCount"></span>
@@ -244,7 +244,7 @@
       </div>
 
       <!-- Debt load -->
-      <div class="panel">
+      <div class="panel" id="onbDebtPanel">
         <div class="panel-head">
           <span class="ph-ic w"><svg class="icon sm" viewBox="0 0 24 24"><path d="M3 21h18"/><path d="M5 21V10l7-5 7 5v11"/><path d="M9 21v-6h6v6"/></svg></span>
           <h2>Долговая нагрузка</h2>
@@ -367,6 +367,11 @@
       </button>
     </div>
 
+    <div style="font-size:12px;color:var(--md-sys-color-on-surface-variant);margin-top:22px;padding-top:14px;border-top:1px solid var(--md-sys-color-outline-variant)">Обучение</div>
+    <button class="btn tonal full" style="margin-top:8px" onclick="closeScrim('profileScrim');startOnboarding()">
+      <svg class="icon sm" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M9.1 9a3 3 0 1 1 4.4 2.6c-.8.5-1.5 1-1.5 2.4"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>Показать обучение заново
+    </button>
+
     <div style="font-size:12px;color:var(--md-sys-color-on-surface-variant);margin-top:22px;padding-top:14px;border-top:1px solid var(--md-sys-color-outline-variant)">Резервная копия</div>
     <div class="desc" style="margin-top:2px">Экспорт/импорт всех данных в файл — на случай переноса или потери доступа.</div>
     <div class="row" style="margin-top:8px">
@@ -451,14 +456,6 @@
       <div class="desc" style="margin-top:-6px">Ставка и дата начала нужны для графика, переплаты и калькулятора досрочного погашения — необязательны.</div>
       <div class="row">
         <div class="field"><input id="dPaymentDay" type="text" inputmode="numeric" placeholder=" " oninput="this.value=this.value.replace(/\D/g,'').slice(0,2)"><label for="dPaymentDay">День платежа (1–31)</label></div>
-      </div>
-      <div class="segmented" id="dNotifySeg">
-        <button id="dNotifyOff" class="sel" onclick="setDebtNotify(false)">Не уведомлять</button>
-        <button id="dNotifyOn" onclick="setDebtNotify(true)">Уведомить на почту</button>
-      </div>
-      <div class="field" id="dNotifyDaysField" style="display:none">
-        <input id="dNotifyDays" type="text" inputmode="numeric" placeholder=" " oninput="this.value=this.value.replace(/\D/g,'').slice(0,2)">
-        <label for="dNotifyDays">За сколько дней напомнить</label>
       </div>
     </div>
     <div id="debtCardFields" style="display:none">
@@ -839,8 +836,15 @@
 
 <div class="snackbar" id="snack"></div>
 
+<!-- ===================== ONBOARDING TOUR ===================== -->
+<div class="onb-scrim" id="onbScrim">
+  <div class="onb-spotlight" id="onbSpotlight"></div>
+  <div class="onb-card" id="onbCard"></div>
+</div>
+
 <script src="assets/brand.js"></script>
 <script src="assets/auth-client.js"></script>
 <script src="assets/core.js"></script>
 <script src="assets/loan-math.js"></script>
+<script src="assets/onboarding.js"></script>
 <script src="assets/app.js"></script>

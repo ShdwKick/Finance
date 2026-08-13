@@ -117,8 +117,6 @@ curl -X POST https://money.burninghouse.ru/api/v1/transactions \
   Клиент сам решает, указывать перевод в актив в рублях или в штуках бумаг.
 - `interestPortion` тоже не пересчитывается сервером (нет формулы амортизации на сервере) —
   клиент сам делит платёж на проценты/тело по ставке долга и присылает готовое число.
-- Email-напоминания о `paymentDay` — отдельный серверный фоновый процесс (не HTTP API),
-  включается/выключается per-долг через `notifyEmail`/`notifyDaysBefore`.
 
 Если понадобится атомарно поменять несколько сущностей разом — либо несколько
 запросов подряд (риск частичного успеха тот же, что у любого multi-request API),
@@ -137,7 +135,8 @@ curl -X POST https://money.burninghouse.ru/api/v1/transactions \
   "hideBalance": false,
   "fixedSkips": ["fixedId:2026-08:5"],
   "piggy": { "enabled": true, "mode": "smart", "amount": 3450 },
-  "displayName": "Данил"
+  "displayName": "Данил",
+  "onboardingDone": true
 }
 ```
 
@@ -231,9 +230,7 @@ curl -X POST https://money.burninghouse.ru/api/v1/transactions \
 | `loanType` | `"mortgage"`\|`"consumer"`\|`"auto"`\|`"installment"`\|`"other"`\|null | `null` | только для обычного кредита; чисто ярлык для отображения/группировки, на расчёты не влияет |
 | `rate` | число > 0 \| null | `null` | только для обычного кредита; % годовых. Если указана — платежи (`debtRepay`) делятся на проценты/тело, появляется график/переплата/калькулятор досрочного погашения в приложении |
 | `startDate` | ISO-строка \| null | `null` | только для обычного кредита; дата оформления |
-| `paymentDay` | целое 1–31 \| null | `null` | только для обычного кредита; день месяца для напоминания |
-| `notifyEmail` | boolean | `false` | только для обычного кредита; слать письмо-напоминание о платеже |
-| `notifyDaysBefore` | целое ≥ 0 | `3` | только для обычного кредита; за сколько дней до `paymentDay` напомнить |
+| `paymentDay` | целое 1–31 \| null | `null` | только для обычного кредита; день месяца, когда обычно происходит платёж (справочно) |
 
 ### fixed-payment
 

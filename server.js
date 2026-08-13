@@ -116,9 +116,7 @@ db.exec(`
     loan_type TEXT,          -- 'mortgage'|'consumer'|'auto'|'installment'|'other'|NULL — ярлык, на расчёты не влияет
     rate REAL,               -- % годовых, NULL = не указана
     start_date TEXT,
-    payment_day INTEGER,     -- 1..31, для уведомлений
-    notify_email INTEGER NOT NULL DEFAULT 0,
-    notify_days_before INTEGER NOT NULL DEFAULT 3,
+    payment_day INTEGER,     -- 1..31, чисто информационно (день платежа)
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL
   );
@@ -164,6 +162,7 @@ db.exec(`
     piggy_mode TEXT NOT NULL DEFAULT 'smart',
     piggy_amount REAL NOT NULL DEFAULT 0,
     display_name TEXT NOT NULL DEFAULT '',
+    onboarding_done INTEGER NOT NULL DEFAULT 0,
     updated_at INTEGER NOT NULL DEFAULT 0
   );
 
@@ -200,8 +199,7 @@ try { db.exec("ALTER TABLE debts ADD COLUMN loan_type TEXT"); } catch { /* уж�
 try { db.exec("ALTER TABLE debts ADD COLUMN rate REAL"); } catch { /* уже есть */ }
 try { db.exec("ALTER TABLE debts ADD COLUMN start_date TEXT"); } catch { /* уже есть */ }
 try { db.exec("ALTER TABLE debts ADD COLUMN payment_day INTEGER"); } catch { /* уже есть */ }
-try { db.exec("ALTER TABLE debts ADD COLUMN notify_email INTEGER NOT NULL DEFAULT 0"); } catch { /* уже есть */ }
-try { db.exec("ALTER TABLE debts ADD COLUMN notify_days_before INTEGER NOT NULL DEFAULT 3"); } catch { /* уже есть */ }
+try { db.exec("ALTER TABLE settings ADD COLUMN onboarding_done INTEGER NOT NULL DEFAULT 0"); } catch { /* уже есть */ }
 
 // Лог для Admin (см. admin-internal.js) — своя таблица поверх той же базы.
 const adminLog = createAdminLog(db);
@@ -251,8 +249,8 @@ const stmt = {
 
   listDebts: db.prepare("SELECT * FROM debts WHERE user_id = ? ORDER BY created_at ASC"),
   getDebt: db.prepare("SELECT * FROM debts WHERE user_id = ? AND id = ?"),
-  insDebt: db.prepare("INSERT INTO debts (id,user_id,kind,name,emoji,card_limit,used,total,remaining,monthly,loan_type,rate,start_date,payment_day,notify_email,notify_days_before,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"),
-  updDebt: db.prepare("UPDATE debts SET kind=?,name=?,emoji=?,card_limit=?,used=?,total=?,remaining=?,monthly=?,loan_type=?,rate=?,start_date=?,payment_day=?,notify_email=?,notify_days_before=?,updated_at=? WHERE user_id=? AND id=?"),
+  insDebt: db.prepare("INSERT INTO debts (id,user_id,kind,name,emoji,card_limit,used,total,remaining,monthly,loan_type,rate,start_date,payment_day,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"),
+  updDebt: db.prepare("UPDATE debts SET kind=?,name=?,emoji=?,card_limit=?,used=?,total=?,remaining=?,monthly=?,loan_type=?,rate=?,start_date=?,payment_day=?,updated_at=? WHERE user_id=? AND id=?"),
   delDebt: db.prepare("DELETE FROM debts WHERE user_id = ? AND id = ?"),
   delAllDebts: db.prepare("DELETE FROM debts WHERE user_id = ?"),
 
@@ -272,12 +270,12 @@ const stmt = {
 
   getSettings: db.prepare("SELECT * FROM settings WHERE user_id = ?"),
   upsertSettings: db.prepare(`
-    INSERT INTO settings (user_id,monthly_income,theme,hide_balance,fixed_skips,piggy_enabled,piggy_mode,piggy_amount,display_name,updated_at)
-    VALUES (?,?,?,?,?,?,?,?,?,?)
+    INSERT INTO settings (user_id,monthly_income,theme,hide_balance,fixed_skips,piggy_enabled,piggy_mode,piggy_amount,display_name,onboarding_done,updated_at)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?)
     ON CONFLICT(user_id) DO UPDATE SET
       monthly_income=excluded.monthly_income, theme=excluded.theme, hide_balance=excluded.hide_balance,
       fixed_skips=excluded.fixed_skips, piggy_enabled=excluded.piggy_enabled, piggy_mode=excluded.piggy_mode,
-      piggy_amount=excluded.piggy_amount, display_name=excluded.display_name, updated_at=excluded.updated_at
+      piggy_amount=excluded.piggy_amount, display_name=excluded.display_name, onboarding_done=excluded.onboarding_done, updated_at=excluded.updated_at
   `),
 
   listAccounts: db.prepare(`
@@ -341,7 +339,7 @@ function validateDebt(body) {
   const value = {
     kind, name: strTrim(body.name, "Без названия"), emoji: strTrim(body.emoji, kind === "card" ? "💳" : "🏦"),
     limit: null, used: null, total: null, remaining: null, monthly: null,
-    loanType: null, rate: null, startDate: null, paymentDay: null, notifyEmail: false, notifyDaysBefore: 3,
+    loanType: null, rate: null, startDate: null, paymentDay: null,
   };
   if (kind === "card") { value.limit = toAmount(body.limit) || 0; value.used = toAmount(body.used) || 0; }
   else {
@@ -350,8 +348,6 @@ function validateDebt(body) {
     const rate = toNum(body.rate); value.rate = rate != null && rate > 0 ? rate : null;
     value.startDate = typeof body.startDate === "string" && !isNaN(Date.parse(body.startDate)) ? body.startDate : null;
     const day = toNum(body.paymentDay); value.paymentDay = day != null && day >= 1 && day <= 31 ? Math.round(day) : null;
-    value.notifyEmail = !!body.notifyEmail;
-    const notifyDays = toNum(body.notifyDaysBefore); value.notifyDaysBefore = notifyDays != null && notifyDays >= 0 ? Math.round(notifyDays) : 3;
   }
   return { ok: true, value };
 }
@@ -382,6 +378,7 @@ function validateSettings(body) {
       fixedSkips: Array.isArray(body.fixedSkips) ? body.fixedSkips.filter(x => typeof x === "string") : [],
       piggy: { enabled: !!piggySrc.enabled, mode: piggySrc.mode === "smart" || !(piggyModeNum > 0) ? "smart" : String(piggyModeNum), amount: toAmount(piggySrc.amount) || 0 },
       displayName: typeof body.displayName === "string" ? body.displayName.trim().slice(0, 60) : "",
+      onboardingDone: !!body.onboardingDone,
     }
   };
 }
@@ -395,14 +392,13 @@ function rowToDebt(r) {
   return {
     ...base, total: r.total, remaining: r.remaining, monthly: r.monthly,
     loanType: r.loan_type, rate: r.rate, startDate: r.start_date, paymentDay: r.payment_day,
-    notifyEmail: !!r.notify_email, notifyDaysBefore: r.notify_days_before,
   };
 }
 function rowToFixed(r) { return { id: r.id, name: r.name, amount: r.amount, days: JSON.parse(r.days || "[]"), emoji: r.emoji, category: r.category }; }
 function rowToAsset(r) { return { id: r.id, name: r.name, emoji: r.emoji, amount: r.amount, ticker: r.ticker, qty: r.qty, lastPrice: r.last_price, priceUpdated: r.price_updated }; }
 function rowToSettings(r) {
-  if (!r) return { monthlyIncome: null, theme: "light", hideBalance: false, fixedSkips: [], piggy: { enabled: false, mode: "smart", amount: 0 }, displayName: "" };
-  return { monthlyIncome: r.monthly_income, theme: r.theme, hideBalance: !!r.hide_balance, fixedSkips: JSON.parse(r.fixed_skips || "[]"), piggy: { enabled: !!r.piggy_enabled, mode: r.piggy_mode, amount: r.piggy_amount }, displayName: r.display_name };
+  if (!r) return { monthlyIncome: null, theme: "light", hideBalance: false, fixedSkips: [], piggy: { enabled: false, mode: "smart", amount: 0 }, displayName: "", onboardingDone: false };
+  return { monthlyIncome: r.monthly_income, theme: r.theme, hideBalance: !!r.hide_balance, fixedSkips: JSON.parse(r.fixed_skips || "[]"), piggy: { enabled: !!r.piggy_enabled, mode: r.piggy_mode, amount: r.piggy_amount }, displayName: r.display_name, onboardingDone: !!r.onboarding_done };
 }
 
 // ---------- миграция блоба -> нормализованные таблицы, лениво при первом обращении ----------
@@ -434,7 +430,7 @@ function ensureUserMigrated(user) {
     console.log(`«${user.username || user.id}»: блоб разобран на нормализованные таблицы (был обновлён ${new Date(updatedAt).toISOString()})`);
   } else {
     // с нуля: просто создаём пустую строку настроек — это и есть отметка «мигрирован»
-    stmt.upsertSettings.run(user.id, null, "light", 0, "[]", 0, "smart", 0, "", now);
+    stmt.upsertSettings.run(user.id, null, "light", 0, "[]", 0, "smart", 0, "", 0, now);
   }
 }
 
@@ -462,13 +458,12 @@ function decomposeInto(userId, data, now) {
       const isCard = d.kind === "card";
       const rate = isCard ? null : (() => { const r = toNum(d.rate); return r != null && r > 0 ? r : null; })();
       const payDay = isCard ? null : (() => { const p = toNum(d.paymentDay); return p != null && p >= 1 && p <= 31 ? Math.round(p) : null; })();
-      const notifyDays = (() => { const n = toNum(d.notifyDaysBefore); return n != null && n >= 0 ? Math.round(n) : 3; })();
       stmt.insDebt.run(
         String(d.id), userId, isCard ? "card" : null, strTrim(d.name, "Без названия"), strTrim(d.emoji, isCard ? "💳" : "🏦"),
         toAmount(d.limit), toAmount(d.used), toAmount(d.total), toAmount(d.remaining), toAmount(d.monthly),
         isCard ? null : (LOAN_TYPES.includes(d.loanType) ? d.loanType : null), rate,
         isCard ? null : (typeof d.startDate === "string" && !isNaN(Date.parse(d.startDate)) ? d.startDate : null),
-        payDay, isCard ? 0 : (d.notifyEmail ? 1 : 0), notifyDays, now, now
+        payDay, now, now
       );
     });
     (Array.isArray(data.fixed) ? data.fixed : []).forEach(f => {
@@ -481,7 +476,11 @@ function decomposeInto(userId, data, now) {
       stmt.insAsset.run(String(a.id), userId, strTrim(a.name, "Без названия"), strTrim(a.emoji, "💰"), toAmount(a.amount) || 0, strOrNull(a.ticker), toNum(a.qty), toNum(a.lastPrice), strOrNull(a.priceUpdated), now, now);
     });
     const piggy = data.piggy && typeof data.piggy === "object" ? data.piggy : {};
-    stmt.upsertSettings.run(userId, toAmount(data.monthlyIncome), data.theme === "dark" ? "dark" : "light", data.hideBalance ? 1 : 0, JSON.stringify(Array.isArray(data.fixedSkips) ? data.fixedSkips : []), piggy.enabled ? 1 : 0, piggy.mode === "smart" ? "smart" : (toNum(piggy.mode) > 0 ? String(toNum(piggy.mode)) : "smart"), toAmount(piggy.amount) || 0, typeof data.displayName === "string" ? data.displayName.slice(0, 60) : "", now);
+    // старые блобы (мигрируют один раз из states_v2, см. ensureUserMigrated) никогда не
+    // знали об onboardingDone — если поля нет, но уже есть реальные операции, считаем
+    // обучение неактуальным (это не новый юзер), а не показываем тур поверх чужих данных
+    const onboardingDone = typeof data.onboardingDone === "boolean" ? data.onboardingDone : (Array.isArray(data.tx) && data.tx.length > 0);
+    stmt.upsertSettings.run(userId, toAmount(data.monthlyIncome), data.theme === "dark" ? "dark" : "light", data.hideBalance ? 1 : 0, JSON.stringify(Array.isArray(data.fixedSkips) ? data.fixedSkips : []), piggy.enabled ? 1 : 0, piggy.mode === "smart" ? "smart" : (toNum(piggy.mode) > 0 ? String(toNum(piggy.mode)) : "smart"), toAmount(piggy.amount) || 0, typeof data.displayName === "string" ? data.displayName.slice(0, 60) : "", onboardingDone ? 1 : 0, now);
 
     db.exec("COMMIT");
   } catch (e) {
@@ -685,8 +684,8 @@ const RESOURCES = {
   },
   debts: {
     list: (uid) => stmt.listDebts.all(uid), get: (uid, id) => stmt.getDebt.get(uid, id), toObj: rowToDebt, validate: validateDebt,
-    create(uid, id, v) { stmt.insDebt.run(id, uid, v.kind, v.name, v.emoji, v.limit, v.used, v.total, v.remaining, v.monthly, v.loanType, v.rate, v.startDate, v.paymentDay, v.notifyEmail ? 1 : 0, v.notifyDaysBefore, now(), now()); return stmt.getDebt.get(uid, id); },
-    update(uid, id, v) { if (!stmt.getDebt.get(uid, id)) return null; stmt.updDebt.run(v.kind, v.name, v.emoji, v.limit, v.used, v.total, v.remaining, v.monthly, v.loanType, v.rate, v.startDate, v.paymentDay, v.notifyEmail ? 1 : 0, v.notifyDaysBefore, now(), uid, id); return stmt.getDebt.get(uid, id); },
+    create(uid, id, v) { stmt.insDebt.run(id, uid, v.kind, v.name, v.emoji, v.limit, v.used, v.total, v.remaining, v.monthly, v.loanType, v.rate, v.startDate, v.paymentDay, now(), now()); return stmt.getDebt.get(uid, id); },
+    update(uid, id, v) { if (!stmt.getDebt.get(uid, id)) return null; stmt.updDebt.run(v.kind, v.name, v.emoji, v.limit, v.used, v.total, v.remaining, v.monthly, v.loanType, v.rate, v.startDate, v.paymentDay, now(), uid, id); return stmt.getDebt.get(uid, id); },
     remove(uid, id) { const existed = !!stmt.getDebt.get(uid, id); if (existed) stmt.delDebt.run(uid, id); return existed; },
   },
   "fixed-payments": {
@@ -771,7 +770,7 @@ const server = http.createServer(async (req, res) => {
       if (!body.ok) return errJson(res, 400, "invalid_json", "Тело запроса — не валидный JSON");
       const v = validateSettings(body.value).value;
       const updatedAt = now();
-      stmt.upsertSettings.run(user.id, v.monthlyIncome, v.theme, v.hideBalance ? 1 : 0, JSON.stringify(v.fixedSkips), v.piggy.enabled ? 1 : 0, v.piggy.mode, v.piggy.amount, v.displayName, updatedAt);
+      stmt.upsertSettings.run(user.id, v.monthlyIncome, v.theme, v.hideBalance ? 1 : 0, JSON.stringify(v.fixedSkips), v.piggy.enabled ? 1 : 0, v.piggy.mode, v.piggy.amount, v.displayName, v.onboardingDone ? 1 : 0, updatedAt);
       return json(res, 200, rowToSettings(stmt.getSettings.get(user.id)));
     }
     return errJson(res, 405, "method_not_allowed", "Метод не поддерживается для этого пути");

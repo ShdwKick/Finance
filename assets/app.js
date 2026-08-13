@@ -1117,19 +1117,12 @@ function setIncome(v){
   updatePdn(); // патчим показатели; поле дохода не пересоздаётся → каретка остаётся на месте
 }
 let debtKind="loan";
-let debtNotify=false;
 function setDebtKind(k){
   debtKind=k;
   document.getElementById("dKindLoan").classList.toggle("sel",k==="loan");
   document.getElementById("dKindCard").classList.toggle("sel",k==="card");
   document.getElementById("debtLoanFields").style.display=k==="loan"?"":"none";
   document.getElementById("debtCardFields").style.display=k==="card"?"":"none";
-}
-function setDebtNotify(v){
-  debtNotify=v;
-  document.getElementById("dNotifyOff").classList.toggle("sel",!v);
-  document.getElementById("dNotifyOn").classList.toggle("sel",v);
-  document.getElementById("dNotifyDaysField").style.display=v?"":"none";
 }
 function openDebt(id){
   editId=id||null;const d=id?state.debts.find(x=>x.id===id):null;
@@ -1146,8 +1139,6 @@ function openDebt(id){
   document.getElementById("dRate").value=d&&d.rate?d.rate:"";
   document.getElementById("dStartDate").value=d&&d.startDate?dateToInput(d.startDate):"";
   document.getElementById("dPaymentDay").value=d&&d.paymentDay?d.paymentDay:"";
-  document.getElementById("dNotifyDays").value=d&&d.notifyDaysBefore!=null?d.notifyDaysBefore:3;
-  setDebtNotify(!!(d&&d.notifyEmail));
   selEmoji=d?d.emoji:(debtKind==="card"?"💳":"🏦");
   renderEmojis("dEmoji",DEBT_EMOJIS);
   openScrim("debtScrim");setTimeout(()=>document.getElementById("dName").focus(),90);
@@ -1171,22 +1162,19 @@ function saveDebt(){
     const rate=parseAmount(document.getElementById("dRate").value);
     const startDateVal=document.getElementById("dStartDate").value;
     const payDay=parseInt(document.getElementById("dPaymentDay").value,10);
-    const notifyDays=parseInt(document.getElementById("dNotifyDays").value,10);
     data={
       name,total,remaining:Math.max(0,remaining),monthly,emoji:selEmoji,
       loanType:document.getElementById("dLoanType").value||"other",
       rate:rate>0?rate:null,
       startDate:startDateVal?dateFromInput(startDateVal):null,
       paymentDay:payDay>=1&&payDay<=31?payDay:null,
-      notifyEmail:debtNotify,
-      notifyDaysBefore:notifyDays>=0?notifyDays:3,
     };
   }
   if(editId){
     const d=state.debts.find(x=>x.id===editId);
     // при смене типа стираем поля другого типа, чтобы не остались «хвосты»
     delete d.kind;delete d.limit;delete d.used;delete d.total;delete d.remaining;delete d.monthly;
-    delete d.loanType;delete d.rate;delete d.startDate;delete d.paymentDay;delete d.notifyEmail;delete d.notifyDaysBefore;
+    delete d.loanType;delete d.rate;delete d.startDate;delete d.paymentDay;
     Object.assign(d,data);
   }else state.debts.push({id:uid(),...data});
   save();closeScrim("debtScrim");render();snack(debtKind==="card"?"Кредитка сохранена":"Долг сохранён");
@@ -1203,6 +1191,7 @@ function openDebtDetail(id){
   if(d.loanType)parts.push(LOAN_TYPE_LABEL[d.loanType]);
   if(d.rate)parts.push(d.rate+"% годовых");
   if(d.startDate)parts.push("с "+fmtDateShort(d.startDate));
+  if(d.paymentDay)parts.push("платёж "+d.paymentDay+"-го числа");
   document.getElementById("ddDesc").textContent=parts.length?parts.join(" · "):"Тип/ставка/дата не указаны";
   const isDone=d.remaining<=0;
   const hasRate=!!d.rate&&!isDone;
@@ -1922,7 +1911,7 @@ if(syncCapable){
     return pullRemote().then(ok2=>{
       if(!ok2)return;
       applyTheme();applyDisplayName();render();setSync("ok");
-      checkDuePayments();scheduleAssetPriceRefresh();
+      checkDuePayments();scheduleAssetPriceRefresh();maybeStartOnboarding();
     });
   }).catch(e=>{
     console.error("Не удалось инициализировать авторизацию:",e);
@@ -1932,4 +1921,5 @@ if(syncCapable){
 }else{
   checkDuePayments();
   scheduleAssetPriceRefresh();
+  maybeStartOnboarding();
 }

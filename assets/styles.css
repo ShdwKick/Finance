@@ -516,4 +516,29 @@
   .login-card .lg-lockup{margin-bottom:16px;font-size:16px}
   .login-card h2{font-size:26px;font-weight:600}
   .login-card p{font-size:13px;color:var(--md-sys-color-on-surface-variant);margin:6px 0 6px}
+
+  /* ===================== ONBOARDING TOUR ===================== */
+  /* Затемняющий слой + «дыра»-спотлайт: один элемент с box-shadow 0 0 0 9999px —
+     классический coachmark-трюк, без клип-путей и без пересчёта нескольких прямоугольников. */
+  .onb-scrim{position:fixed;inset:0;z-index:150;display:none}
+  .onb-scrim.show{display:block}
+  .onb-spotlight{position:fixed;border-radius:var(--md-sys-shape-corner-l);
+    box-shadow:0 0 0 9999px rgba(10,8,6,.62);pointer-events:none;
+    transition:top .25s var(--ease-emph-dec),left .25s var(--ease-emph-dec),width .25s var(--ease-emph-dec),height .25s var(--ease-emph-dec);
+    outline:2px solid var(--md-sys-color-primary);outline-offset:3px}
+  .onb-card{position:fixed;z-index:151;max-width:320px;
+    background:var(--md-sys-color-surface-container-lowest);border:1px solid var(--md-sys-color-outline-variant);
+    border-radius:var(--md-sys-shape-corner-l);padding:18px;box-shadow:var(--e2);
+    animation:pop .25s var(--ease-emph-dec)}
+  .onb-card.center{position:fixed;top:50%;left:50%;max-width:360px;text-align:center;animation:popCenter .25s var(--ease-emph-dec) forwards}
+  @keyframes popCenter{from{opacity:0;transform:translate(-50%,-50%) scale(.92)}to{opacity:1;transform:translate(-50%,-50%) scale(1)}}
+  .onb-step{font-size:12px;color:var(--md-sys-color-on-surface-variant);margin-bottom:6px}
+  .onb-card h3{font-size:17px;margin-bottom:6px}
+  .onb-card p{font-size:13px;line-height:1.5;color:var(--md-sys-color-on-surface-variant);margin-bottom:14px}
+  .onb-actions{display:flex;align-items:center;gap:8px}
+  .onb-actions .spacer{flex:1}
+  .onb-dots{display:flex;gap:5px;justify-content:center;margin-bottom:10px}
+  .onb-dots i{width:6px;height:6px;border-radius:50%;background:var(--md-sys-color-outline-variant);display:block}
+  .onb-dots i.on{background:var(--md-sys-color-primary)}
+  @media(max-width:520px){.onb-card{max-width:calc(100vw - 32px)}}
   .login-err{color:var(--md-sys-color-error);font-size:13px;min-height:18px;margin-top:10px}
