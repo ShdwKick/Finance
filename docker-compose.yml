@@ -14,6 +14,9 @@ services:
       # он поднимает оба сервиса разом и всё прописывает сам.
       AUTH_ISSUER: http://localhost:8788
       AUTH_CLIENT_ID: finance
+      # Общий секрет для Admin (/internal/*, см. admin-internal.js) — то же
+      # значение, что в Auth и остальных сервисах.
+      ADMIN_INTERNAL_KEY: dev-admin-key
       # Если фронтенд отдаётся отдельно (напр. GitHub Pages), а этот контейнер — только API:
       # ALLOWED_ORIGIN: https://burning-house.online
     ports:

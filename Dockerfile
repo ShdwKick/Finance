@@ -5,6 +5,7 @@ WORKDIR /app
 # Копируем только то, что реально нужно в рантайме
 COPY server.js ./
 COPY auth-client.js ./
+COPY admin-internal.js ./
 COPY index.html ./
 COPY assets/ ./assets/
 

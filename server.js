@@ -41,6 +41,7 @@ const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
 const { DatabaseSync } = require("node:sqlite");
+const { checkAdminKey, createAdminLog } = require("./admin-internal");
 
 const PORT = parseInt(process.env.PORT || "8787", 10);
 const HOST = process.env.HOST || "127.0.0.1";
@@ -183,6 +184,9 @@ try { db.exec("ALTER TABLE transactions ADD COLUMN asset_id TEXT"); } catch { /*
 try { db.exec("ALTER TABLE transactions ADD COLUMN goal_id TEXT"); } catch { /* уже есть */ }
 try { db.exec("ALTER TABLE transactions ADD COLUMN debt_repay TEXT"); } catch { /* уже есть */ }
 try { db.exec("ALTER TABLE transactions ADD COLUMN asset_qty REAL"); } catch { /* уже есть */ }
+
+// Лог для Admin (см. admin-internal.js) — своя таблица поверх той же базы.
+const adminLog = createAdminLog(db);
 
 // одноразовая миграция с самого старого формата (плоский store.json)
 if (dbIsNew && fs.existsSync(OLD_JSON_STORE)) {
@@ -651,6 +655,7 @@ const RESOURCES = {
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, "http://x");
   const p = url.pathname;
+  try {
 
   // CORS: нужен, только если фронтенд отдаётся отдельно от этого сервера.
   // Без ALLOWED_ORIGIN заголовки не шлём (обычный случай — всё на одном домене).
@@ -665,6 +670,27 @@ const server = http.createServer(async (req, res) => {
   // не был зашит в статику и менялся одной переменной окружения.
   if (p === "/api/v1/config") return json(res, 200, { authBase: AUTH_BASE, clientId: AUTH_CLIENT_ID });
   if (p === "/api/v1/health") return json(res, 200, { ok: true });
+
+  // Для Admin: server-to-server по общему ключу (см. admin-internal.js), не SSO.
+  if (p === "/internal/stats" && req.method === "GET") {
+    if (!checkAdminKey(req)) return errJson(res, 403, "forbidden", "Доступ запрещён");
+    return json(res, 200, {
+      ok: true,
+      users: db.prepare("SELECT COUNT(*) AS n FROM settings").get().n,
+      transactions: db.prepare("SELECT COUNT(*) AS n FROM transactions").get().n,
+      goals: db.prepare("SELECT COUNT(*) AS n FROM goals").get().n,
+      debts: db.prepare("SELECT COUNT(*) AS n FROM debts").get().n,
+      assets: db.prepare("SELECT COUNT(*) AS n FROM assets").get().n,
+    });
+  }
+  if (p === "/internal/logs" && req.method === "GET") {
+    if (!checkAdminKey(req)) return errJson(res, 403, "forbidden", "Доступ запрещён");
+    const since = url.searchParams.get("since");
+    const limit = url.searchParams.get("limit");
+    return json(res, 200, {
+      logs: adminLog.recent({ since: since ? Number(since) : undefined, limit: limit ? Number(limit) : undefined }),
+    });
+  }
 
   // Гранулярные REST-ресурсы: /api/v1/<resource>[/<id>]
   for (const name of Object.keys(RESOURCES)) {
@@ -725,6 +751,12 @@ const server = http.createServer(async (req, res) => {
     return serveApp(res);
   }
   res.writeHead(404); res.end();
+  } catch (e) {
+    console.error("Необработанная ошибка:", e);
+    adminLog.error("Необработанная ошибка", { path: p, method: req.method, message: e.message });
+    if (!res.headersSent) return errJson(res, 500, "server_error", "Внутренняя ошибка сервера");
+    res.end();
+  }
 });
 
 server.listen(PORT, HOST, () => {
