@@ -302,7 +302,9 @@ function delTx(id){
     }
     if(doomed.debtRepay){
       const dd=state.debts.find(x=>x.id===doomed.debtRepay);
-      if(dd)dd.remaining=Math.max(0,dd.remaining+doomed.amount);
+      // если платёж был разбит на проценты/тело (ставка была указана) — в remaining
+      // возвращаем только часть тела, проценты remaining никогда не трогали
+      if(dd)dd.remaining=Math.max(0,dd.remaining+(doomed.interestPortion!=null?doomed.amount-doomed.interestPortion:doomed.amount));
     }
   }
   state.tx=state.tx.filter(t=>t.id!==id);
@@ -548,6 +550,7 @@ function saveTxEdit(){
     const g=state.goals.find(x=>x.id===t.goalId);
     if(g)g.saved=Math.max(0,g.saved+(t.type==="exp"?amount-t.amount:t.amount-amount));
   }
+  if(t.interestPortion!=null&&amount!==t.amount)return snack("Этот платёж разбит на проценты/тело долга — чтобы поправить сумму, удалите его и внесите заново");
   if(t.debtRepay&&amount!==t.amount){
     const dd=state.debts.find(x=>x.id===t.debtRepay);
     if(dd)dd.remaining=Math.max(0,dd.remaining-(amount-t.amount));
@@ -1091,14 +1094,16 @@ function renderDebts(){
     }
     const paidPct=d.total>0?Math.min(100,Math.round((d.total-d.remaining)/d.total*100)):0;
     const done=d.remaining<=0;
+    const typeTag=d.loanType?" · "+LOAN_TYPE_LABEL[d.loanType]:"";
     return `<div class="tile ${done?"done":""}">
       <div class="top"><div class="emoji">${d.emoji}</div>
         <div><div class="tname">${esc(d.name)}</div>
-        <div class="tsub">${done?"Погашено! 🎉":"осталось "+fmt(d.remaining)+" · "+fmt(d.monthly||0)+"/мес"}</div></div>
+        <div class="tsub">${done?"Погашено! 🎉":"осталось "+fmt(d.remaining)+" · "+fmt(d.monthly||0)+"/мес"}${typeTag}</div></div>
         <div class="pct">${paidPct}%</div></div>
       <div class="linear"><i data-w="${paidPct}"></i></div>
       <div class="acts">
         <button class="btn tonal" onclick="openAmt('debt','${d.id}')" ${done?"disabled style=opacity:.5":""}>Внести платёж</button>
+        <button class="btn text" onclick="openDebtDetail('${d.id}')">Подробнее</button>
         <button class="btn text" onclick="openDebt('${d.id}')">Изменить</button>
         <button class="btn text danger" onclick="delDebt('${d.id}')" style="flex:0 0 44px;padding:0">
           <svg class="icon sm" viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg></button>
@@ -1112,12 +1117,19 @@ function setIncome(v){
   updatePdn(); // патчим показатели; поле дохода не пересоздаётся → каретка остаётся на месте
 }
 let debtKind="loan";
+let debtNotify=false;
 function setDebtKind(k){
   debtKind=k;
   document.getElementById("dKindLoan").classList.toggle("sel",k==="loan");
   document.getElementById("dKindCard").classList.toggle("sel",k==="card");
   document.getElementById("debtLoanFields").style.display=k==="loan"?"":"none";
   document.getElementById("debtCardFields").style.display=k==="card"?"":"none";
+}
+function setDebtNotify(v){
+  debtNotify=v;
+  document.getElementById("dNotifyOff").classList.toggle("sel",!v);
+  document.getElementById("dNotifyOn").classList.toggle("sel",v);
+  document.getElementById("dNotifyDaysField").style.display=v?"":"none";
 }
 function openDebt(id){
   editId=id||null;const d=id?state.debts.find(x=>x.id===id):null;
@@ -1129,6 +1141,13 @@ function openDebt(id){
   document.getElementById("dMonthly").value=d&&d.kind!=="card"?(d.monthly||""):"";
   document.getElementById("dLimit").value=d&&d.kind==="card"?d.limit:"";
   document.getElementById("dUsed").value=d&&d.kind==="card"?d.used:"";
+  document.getElementById("dLoanType").innerHTML=LOAN_TYPES.map(t=>`<option value="${t}">${LOAN_TYPE_LABEL[t]}</option>`).join("");
+  document.getElementById("dLoanType").value=(d&&d.loanType)||"other";
+  document.getElementById("dRate").value=d&&d.rate?d.rate:"";
+  document.getElementById("dStartDate").value=d&&d.startDate?dateToInput(d.startDate):"";
+  document.getElementById("dPaymentDay").value=d&&d.paymentDay?d.paymentDay:"";
+  document.getElementById("dNotifyDays").value=d&&d.notifyDaysBefore!=null?d.notifyDaysBefore:3;
+  setDebtNotify(!!(d&&d.notifyEmail));
   selEmoji=d?d.emoji:(debtKind==="card"?"💳":"🏦");
   renderEmojis("dEmoji",DEBT_EMOJIS);
   openScrim("debtScrim");setTimeout(()=>document.getElementById("dName").focus(),90);
@@ -1149,17 +1168,104 @@ function saveDebt(){
     const monthly=Math.max(0,parseAmount(document.getElementById("dMonthly").value)||0);
     if(!total||total<=0)return snack("Введите общую сумму долга");
     if(isNaN(remaining))remaining=total;
-    data={name,total,remaining:Math.max(0,remaining),monthly,emoji:selEmoji};
+    const rate=parseAmount(document.getElementById("dRate").value);
+    const startDateVal=document.getElementById("dStartDate").value;
+    const payDay=parseInt(document.getElementById("dPaymentDay").value,10);
+    const notifyDays=parseInt(document.getElementById("dNotifyDays").value,10);
+    data={
+      name,total,remaining:Math.max(0,remaining),monthly,emoji:selEmoji,
+      loanType:document.getElementById("dLoanType").value||"other",
+      rate:rate>0?rate:null,
+      startDate:startDateVal?dateFromInput(startDateVal):null,
+      paymentDay:payDay>=1&&payDay<=31?payDay:null,
+      notifyEmail:debtNotify,
+      notifyDaysBefore:notifyDays>=0?notifyDays:3,
+    };
   }
   if(editId){
     const d=state.debts.find(x=>x.id===editId);
     // при смене типа стираем поля другого типа, чтобы не остались «хвосты»
     delete d.kind;delete d.limit;delete d.used;delete d.total;delete d.remaining;delete d.monthly;
+    delete d.loanType;delete d.rate;delete d.startDate;delete d.paymentDay;delete d.notifyEmail;delete d.notifyDaysBefore;
     Object.assign(d,data);
   }else state.debts.push({id:uid(),...data});
   save();closeScrim("debtScrim");render();snack(debtKind==="card"?"Кредитка сохранена":"Долг сохранён");
 }
 function delDebt(id){if(confirm("Удалить этот долг?")){state.debts=state.debts.filter(d=>d.id!==id);save();render();}}
+
+/* ---------- «Подробнее» о кредите: переплата, график, досрочное погашение ---------- */
+let ddDebtId=null,ddStrategy="term";
+function openDebtDetail(id){
+  const d=state.debts.find(x=>x.id===id);if(!d)return;
+  ddDebtId=id;
+  document.getElementById("ddTitle").textContent=d.emoji+" "+d.name;
+  const parts=[];
+  if(d.loanType)parts.push(LOAN_TYPE_LABEL[d.loanType]);
+  if(d.rate)parts.push(d.rate+"% годовых");
+  if(d.startDate)parts.push("с "+fmtDateShort(d.startDate));
+  document.getElementById("ddDesc").textContent=parts.length?parts.join(" · "):"Тип/ставка/дата не указаны";
+  const isDone=d.remaining<=0;
+  const hasRate=!!d.rate&&!isDone;
+  document.getElementById("ddNoRateHint").style.display=hasRate?"none":"";
+  document.getElementById("ddNoRateHint").textContent=isDone?"Долг уже погашен.":"Укажите ставку и дату начала в «Изменить», чтобы увидеть график, переплату и калькулятор досрочного погашения.";
+  document.getElementById("ddContent").style.display=hasRate?"":"none";
+  document.getElementById("ddExtraResult").style.display="none";
+  document.getElementById("ddExtraAmount").value="";
+  document.getElementById("ddExtraDate").value="";
+  setDdStrategy("term");
+  const paidInterest=state.tx.filter(t=>t.debtRepay===id&&t.interestPortion!=null).reduce((s,t)=>s+t.interestPortion,0);
+  if(isDone&&paidInterest>0)document.getElementById("ddNoRateHint").textContent+=" Всего переплачено процентами: "+fmt(paidInterest)+".";
+  if(hasRate){
+    const sched=buildAnnuitySchedule({principal:d.remaining,annualPct:d.rate,payment:d.monthly||0});
+    const payoffReached=sched.rows.length&&sched.rows[sched.rows.length-1].balance<=0.01;
+    document.getElementById("ddPaidInterest").textContent=fmt(paidInterest);
+    document.getElementById("ddRemainInterest").textContent=payoffReached?fmt(sched.totalInterest):"— (платёж не покрывает проценты)";
+    const payoff=new Date();payoff.setMonth(payoff.getMonth()+sched.rows.length);
+    document.getElementById("ddPayoffDate").textContent=payoffReached?payoff.toLocaleDateString("ru-RU",{month:"long",year:"numeric"}):"—";
+    document.getElementById("ddChart").innerHTML=debtBalanceChartSvg(sched.rows,d.remaining);
+  }else{
+    document.getElementById("ddChart").innerHTML="";
+  }
+  openScrim("debtDetailScrim");
+}
+function setDdStrategy(s){
+  ddStrategy=s;
+  document.getElementById("ddStratTerm").classList.toggle("sel",s==="term");
+  document.getElementById("ddStratPayment").classList.toggle("sel",s==="payment");
+}
+function debtBalanceChartSvg(rows,startBalance){
+  if(!rows.length)return"";
+  const W=300,H=110,pad=4;
+  const max=startBalance||rows[0].balance||1;
+  const step=rows.length>1?(W-2*pad)/(rows.length-1):0;
+  const pts=[{x:pad,y:H-pad-(startBalance/max)*(H-2*pad)},...rows.map((r,i)=>({x:pad+(i+1)*step,y:H-pad-(r.balance/max)*(H-2*pad)}))];
+  const line=pts.map((p,i)=>(i?"L":"M")+p.x.toFixed(1)+" "+p.y.toFixed(1)).join(" ");
+  const area=line+` L ${pts[pts.length-1].x.toFixed(1)} ${H-pad} L ${pad} ${H-pad} Z`;
+  return `<path d="${area}" fill="var(--md-sys-color-primary)" opacity="0.12"/><path d="${line}" fill="none" stroke="var(--md-sys-color-primary)" stroke-width="2"/>`;
+}
+function calcEarlyRepay(){
+  const d=state.debts.find(x=>x.id===ddDebtId);if(!d||!d.rate)return;
+  const amount=parseAmount(document.getElementById("ddExtraAmount").value);
+  const dateVal=document.getElementById("ddExtraDate").value;
+  if(!amount||amount<=0)return snack("Введите сумму доп. платежа");
+  if(!dateVal)return snack("Введите дату");
+  const target=dateFromInput(dateVal);
+  const months=Math.max(1,Math.round((new Date(target)-new Date())/(30.44*24*3600*1000)));
+  const payment=d.monthly||0;
+  const baseline=buildAnnuitySchedule({principal:d.remaining,annualPct:d.rate,payment});
+  const withExtra=buildAnnuitySchedule({principal:d.remaining,annualPct:d.rate,payment,extraPayments:[{afterMonth:months,amount,strategy:ddStrategy}]});
+  const interestSaved=Math.max(0,round2(baseline.totalInterest-withExtra.totalInterest));
+  const box=document.getElementById("ddExtraResult");
+  box.style.display="flex";
+  if(ddStrategy==="term"){
+    const monthsSaved=baseline.months-withExtra.months;
+    box.innerHTML=`<span>Экономия на процентах: <b>${fmt(interestSaved)}</b></span><span>Срок сократится на ${monthsSaved} мес.</span>`;
+  }else{
+    const newPayment=withExtra.rows.find(r=>r.n===months+1);
+    box.innerHTML=`<span>Экономия на процентах: <b>${fmt(interestSaved)}</b></span><span>Новый платёж: ${newPayment?fmt(newPayment.payment):fmt(payment)}/мес</span>`;
+  }
+}
+function fmtDateShort(iso){return new Date(iso).toLocaleDateString("ru-RU",{day:"numeric",month:"short",year:"numeric"});}
 
 /* ---------- amount dialog (goal deposit / debt payment) ---------- */
 function openAmt(mode,id){
@@ -1227,10 +1333,20 @@ function confirmAmt(){
   }else{
     const d=state.debts.find(x=>x.id===amtId);const was=d.remaining<=0;
     const pay=Math.abs(v);
-    d.remaining=Math.max(0,d.remaining-pay);
+    // если у долга указана ставка — платёж честно делится на проценты (на остаток ДО
+    // платежа) и тело; проценты в remaining никогда не попадают, иначе переплата теряется
+    let interestPortion=null;
+    if(d.rate){
+      interestPortion=Math.min(pay,round2(d.remaining*loanMonthlyRate(d.rate)));
+      d.remaining=Math.max(0,d.remaining-(pay-interestPortion));
+    }else{
+      d.remaining=Math.max(0,d.remaining-pay);
+    }
     // платёж по обычному кредиту — реальный уход денег со счёта, но не расход в аналитике
     // (netTxAmount=0), как и погашение кредитки/перевод в актив выше
-    state.tx.unshift({id:uid(),type:"exp",amount:pay,cat:"Платёж по долгу",note:"Платёж · "+d.name,date:new Date().toISOString(),debtRepay:d.id});
+    const tx={id:uid(),type:"exp",amount:pay,cat:"Платёж по долгу",note:"Платёж · "+d.name,date:new Date().toISOString(),debtRepay:d.id};
+    if(interestPortion!=null)tx.interestPortion=interestPortion;
+    state.tx.unshift(tx);
     save();closeScrim("amtScrim");render();
     if(!was&&d.remaining<=0){celebrate();snack("Долг погашен! 🎉");}else snack("Платёж внесён");
   }
@@ -1788,7 +1904,7 @@ document.getElementById("amtValue").addEventListener("keydown",e=>{if(e.key==="E
 document.getElementById("aAmount").addEventListener("keydown",e=>{if(e.key==="Enter")saveAsset();});
 document.getElementById("histSearch").addEventListener("keydown",e=>{if(e.key==="Enter")e.preventDefault();});
 document.getElementById("logoutBtn").onclick=logout;
-["goalScrim","debtScrim","amtScrim","fixedScrim","fixInfoScrim","txScrim","dueScrim","assetScrim","fullHistoryScrim","fullGoalsScrim","fullAssetsScrim","fullFixedScrim","calcScrim","cardSpendScrim","piggyScrim","profileScrim"].forEach(id=>document.getElementById(id).addEventListener("click",e=>{if(e.target.id===id)closeScrim(id);}));
+["goalScrim","debtScrim","debtDetailScrim","amtScrim","fixedScrim","fixInfoScrim","txScrim","dueScrim","assetScrim","fullHistoryScrim","fullGoalsScrim","fullAssetsScrim","fullFixedScrim","calcScrim","cardSpendScrim","piggyScrim","profileScrim"].forEach(id=>document.getElementById(id).addEventListener("click",e=>{if(e.target.id===id)closeScrim(id);}));
 document.addEventListener("keydown",e=>{if(e.key==="Escape")document.querySelectorAll(".scrim.show").forEach(s=>s.classList.remove("show"));});
 window.addEventListener("scroll",()=>document.getElementById("appbar").classList.toggle("scrolled",window.scrollY>4));
 

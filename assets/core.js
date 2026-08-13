@@ -18,6 +18,9 @@ const DEBT_EMOJIS=["🏦","🏠","🚗","💳","📱","🎓","👤","🧾","💸
 const CAT_COLORS=["#00a06b","#3f8cff","#ff7043","#ab47bc","#ffb300","#26c6da","#ec407a","#8d6e63","#5c6bc0","#78909c"];
 const FIX_EMOJIS=["🏠","💡","📶","📱","📺","🚗","🏦","🍽️","🎓","💧","🔥","🛡️"];
 const ASSET_EMOJIS=["💰","🏦","📈","💎","🪙","🏠","🚗","💳","🐖","📊","💵","🧾"];
+/* тип кредита/долга — чисто ярлык для отображения и группировки в аналитике, на расчёты не влияет */
+const LOAN_TYPES=["mortgage","consumer","auto","installment","other"];
+const LOAN_TYPE_LABEL={mortgage:"Ипотека",consumer:"Потребительский",auto:"Автокредит",installment:"Рассрочка",other:"Другое"};
 
 /* ---------- sync layer (only active when served over http, not file://) ---------- */
 const syncCapable=location.protocol==="http:"||location.protocol==="https:";
@@ -98,6 +101,9 @@ function normTxList(list,nowIso){
     ["refundFor","cardId","cardRepay","piggyId","assetId","goalId","debtRepay"].forEach(k=>{if(k in t&&typeof t[k]!=="string")t[k]=null;});
     // assetQty — не ссылка, а число (штук бумаг); null, если отсутствует или некорректно
     if("assetQty" in t){const q=normNum(t.assetQty);t.assetQty=q>0?q:null;}
+    // interestPortion — часть платежа по кредиту (debtRepay), ушедшая на проценты, а не в тело долга;
+    // считается только когда у долга указана ставка, иначе 0/отсутствует — старые платежи не трогает
+    if("interestPortion" in t){const ip=normNum(t.interestPortion);t.interestPortion=ip>0?ip:null;}
     kept.push(t);
   });
   // возврат, привязанный к выброшенной операции, тихо съел бы свою сумму в аналитике (netTxAmount)
@@ -139,6 +145,13 @@ function normDebtList(list){
       d.total=Math.max(0,normAmount(d.total)||0);
       d.remaining=Math.max(0,normAmount(d.remaining)||0);
       d.monthly=Math.max(0,normAmount(d.monthly)||0);
+      // тип — просто ярлык для отображения/аналитики, на расчёты не влияет
+      d.loanType=LOAN_TYPES.includes(d.loanType)?d.loanType:null;
+      const rate=normNum(d.rate);d.rate=rate>0?rate:null; // ставка % годовых, null = неизвестна
+      d.startDate=dateOk(d.startDate)?d.startDate:null;
+      const day=normNum(d.paymentDay);d.paymentDay=day>=1&&day<=31?Math.round(day):null;
+      d.notifyEmail=!!d.notifyEmail;
+      const notifyDays=normNum(d.notifyDaysBefore);d.notifyDaysBefore=notifyDays>=0?Math.round(notifyDays):3;
     }
     kept.push(d);
   });

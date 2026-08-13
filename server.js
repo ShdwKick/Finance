@@ -108,6 +108,12 @@ db.exec(`
     total REAL,
     remaining REAL,
     monthly REAL,
+    loan_type TEXT,          -- 'mortgage'|'consumer'|'auto'|'installment'|'other'|NULL — ярлык, на расчёты не влияет
+    rate REAL,               -- % годовых, NULL = не указана
+    start_date TEXT,
+    payment_day INTEGER,     -- 1..31, для уведомлений
+    notify_email INTEGER NOT NULL DEFAULT 0,
+    notify_days_before INTEGER NOT NULL DEFAULT 3,
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL
   );
@@ -184,6 +190,13 @@ try { db.exec("ALTER TABLE transactions ADD COLUMN asset_id TEXT"); } catch { /*
 try { db.exec("ALTER TABLE transactions ADD COLUMN goal_id TEXT"); } catch { /* уже есть */ }
 try { db.exec("ALTER TABLE transactions ADD COLUMN debt_repay TEXT"); } catch { /* уже есть */ }
 try { db.exec("ALTER TABLE transactions ADD COLUMN asset_qty REAL"); } catch { /* уже есть */ }
+try { db.exec("ALTER TABLE transactions ADD COLUMN interest_portion REAL"); } catch { /* уже есть */ }
+try { db.exec("ALTER TABLE debts ADD COLUMN loan_type TEXT"); } catch { /* уже есть */ }
+try { db.exec("ALTER TABLE debts ADD COLUMN rate REAL"); } catch { /* уже есть */ }
+try { db.exec("ALTER TABLE debts ADD COLUMN start_date TEXT"); } catch { /* уже есть */ }
+try { db.exec("ALTER TABLE debts ADD COLUMN payment_day INTEGER"); } catch { /* уже есть */ }
+try { db.exec("ALTER TABLE debts ADD COLUMN notify_email INTEGER NOT NULL DEFAULT 0"); } catch { /* уже есть */ }
+try { db.exec("ALTER TABLE debts ADD COLUMN notify_days_before INTEGER NOT NULL DEFAULT 3"); } catch { /* уже есть */ }
 
 // Лог для Admin (см. admin-internal.js) — своя таблица поверх той же базы.
 const adminLog = createAdminLog(db);
@@ -219,8 +232,8 @@ const stmt = {
   // v3, нормализованные таблицы
   listTx: db.prepare("SELECT * FROM transactions WHERE user_id = ? ORDER BY date DESC"),
   getTx: db.prepare("SELECT * FROM transactions WHERE user_id = ? AND id = ?"),
-  insTx: db.prepare("INSERT INTO transactions (id,user_id,type,cat,amount,note,date,fixed_id,refund_for,card_id,card_repay,piggy_id,asset_id,goal_id,debt_repay,asset_qty,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"),
-  updTx: db.prepare("UPDATE transactions SET type=?,cat=?,amount=?,note=?,date=?,fixed_id=?,refund_for=?,card_id=?,card_repay=?,piggy_id=?,asset_id=?,goal_id=?,debt_repay=?,asset_qty=?,updated_at=? WHERE user_id=? AND id=?"),
+  insTx: db.prepare("INSERT INTO transactions (id,user_id,type,cat,amount,note,date,fixed_id,refund_for,card_id,card_repay,piggy_id,asset_id,goal_id,debt_repay,asset_qty,interest_portion,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"),
+  updTx: db.prepare("UPDATE transactions SET type=?,cat=?,amount=?,note=?,date=?,fixed_id=?,refund_for=?,card_id=?,card_repay=?,piggy_id=?,asset_id=?,goal_id=?,debt_repay=?,asset_qty=?,interest_portion=?,updated_at=? WHERE user_id=? AND id=?"),
   delTx: db.prepare("DELETE FROM transactions WHERE user_id = ? AND id = ?"),
   delAllTx: db.prepare("DELETE FROM transactions WHERE user_id = ?"),
 
@@ -233,8 +246,8 @@ const stmt = {
 
   listDebts: db.prepare("SELECT * FROM debts WHERE user_id = ? ORDER BY created_at ASC"),
   getDebt: db.prepare("SELECT * FROM debts WHERE user_id = ? AND id = ?"),
-  insDebt: db.prepare("INSERT INTO debts (id,user_id,kind,name,emoji,card_limit,used,total,remaining,monthly,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)"),
-  updDebt: db.prepare("UPDATE debts SET kind=?,name=?,emoji=?,card_limit=?,used=?,total=?,remaining=?,monthly=?,updated_at=? WHERE user_id=? AND id=?"),
+  insDebt: db.prepare("INSERT INTO debts (id,user_id,kind,name,emoji,card_limit,used,total,remaining,monthly,loan_type,rate,start_date,payment_day,notify_email,notify_days_before,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"),
+  updDebt: db.prepare("UPDATE debts SET kind=?,name=?,emoji=?,card_limit=?,used=?,total=?,remaining=?,monthly=?,loan_type=?,rate=?,start_date=?,payment_day=?,notify_email=?,notify_days_before=?,updated_at=? WHERE user_id=? AND id=?"),
   delDebt: db.prepare("DELETE FROM debts WHERE user_id = ? AND id = ?"),
   delAllDebts: db.prepare("DELETE FROM debts WHERE user_id = ?"),
 
@@ -306,6 +319,7 @@ function validateTx(body) {
       cardId: strOrNull(body.cardId), cardRepay: strOrNull(body.cardRepay), piggyId: strOrNull(body.piggyId),
       assetId: strOrNull(body.assetId), goalId: strOrNull(body.goalId), debtRepay: strOrNull(body.debtRepay),
       assetQty: (() => { const q = toNum(body.assetQty); return q != null && q > 0 ? q : null; })(),
+      interestPortion: (() => { const ip = toNum(body.interestPortion); return ip != null && ip > 0 ? ip : null; })(),
     }
   };
 }
@@ -316,11 +330,24 @@ function validateGoal(body) {
   if (Object.keys(errors).length) return { ok: false, errors };
   return { ok: true, value: { target, saved: toAmount(body.saved) || 0, name: strTrim(body.name, "Без названия"), emoji: strTrim(body.emoji, "🎯") } };
 }
+const LOAN_TYPES = ["mortgage", "consumer", "auto", "installment", "other"];
 function validateDebt(body) {
   const kind = body.kind === "card" ? "card" : null;
-  const value = { kind, name: strTrim(body.name, "Без названия"), emoji: strTrim(body.emoji, kind === "card" ? "💳" : "🏦"), limit: null, used: null, total: null, remaining: null, monthly: null };
+  const value = {
+    kind, name: strTrim(body.name, "Без названия"), emoji: strTrim(body.emoji, kind === "card" ? "💳" : "🏦"),
+    limit: null, used: null, total: null, remaining: null, monthly: null,
+    loanType: null, rate: null, startDate: null, paymentDay: null, notifyEmail: false, notifyDaysBefore: 3,
+  };
   if (kind === "card") { value.limit = toAmount(body.limit) || 0; value.used = toAmount(body.used) || 0; }
-  else { value.total = toAmount(body.total) || 0; value.remaining = toAmount(body.remaining) || 0; value.monthly = toAmount(body.monthly) || 0; }
+  else {
+    value.total = toAmount(body.total) || 0; value.remaining = toAmount(body.remaining) || 0; value.monthly = toAmount(body.monthly) || 0;
+    value.loanType = LOAN_TYPES.includes(body.loanType) ? body.loanType : null;
+    const rate = toNum(body.rate); value.rate = rate != null && rate > 0 ? rate : null;
+    value.startDate = typeof body.startDate === "string" && !isNaN(Date.parse(body.startDate)) ? body.startDate : null;
+    const day = toNum(body.paymentDay); value.paymentDay = day != null && day >= 1 && day <= 31 ? Math.round(day) : null;
+    value.notifyEmail = !!body.notifyEmail;
+    const notifyDays = toNum(body.notifyDaysBefore); value.notifyDaysBefore = notifyDays != null && notifyDays >= 0 ? Math.round(notifyDays) : 3;
+  }
   return { ok: true, value };
 }
 function validateFixed(body) {
@@ -355,12 +382,16 @@ function validateSettings(body) {
 }
 
 // ---------- преобразование строк БД <-> формы, которые ждёт клиент ----------
-function rowToTx(r) { return { id: r.id, type: r.type, cat: r.cat, amount: r.amount, note: r.note, date: r.date, fixedId: r.fixed_id, refundFor: r.refund_for, cardId: r.card_id, cardRepay: r.card_repay, piggyId: r.piggy_id, assetId: r.asset_id, goalId: r.goal_id, debtRepay: r.debt_repay, assetQty: r.asset_qty }; }
+function rowToTx(r) { return { id: r.id, type: r.type, cat: r.cat, amount: r.amount, note: r.note, date: r.date, fixedId: r.fixed_id, refundFor: r.refund_for, cardId: r.card_id, cardRepay: r.card_repay, piggyId: r.piggy_id, assetId: r.asset_id, goalId: r.goal_id, debtRepay: r.debt_repay, assetQty: r.asset_qty, interestPortion: r.interest_portion }; }
 function rowToGoal(r) { return { id: r.id, name: r.name, target: r.target, saved: r.saved, emoji: r.emoji }; }
 function rowToDebt(r) {
   const base = { id: r.id, name: r.name, emoji: r.emoji };
   if (r.kind === "card") return { ...base, kind: "card", limit: r.card_limit, used: r.used };
-  return { ...base, total: r.total, remaining: r.remaining, monthly: r.monthly };
+  return {
+    ...base, total: r.total, remaining: r.remaining, monthly: r.monthly,
+    loanType: r.loan_type, rate: r.rate, startDate: r.start_date, paymentDay: r.payment_day,
+    notifyEmail: !!r.notify_email, notifyDaysBefore: r.notify_days_before,
+  };
 }
 function rowToFixed(r) { return { id: r.id, name: r.name, amount: r.amount, days: JSON.parse(r.days || "[]"), emoji: r.emoji, category: r.category }; }
 function rowToAsset(r) { return { id: r.id, name: r.name, emoji: r.emoji, amount: r.amount, ticker: r.ticker, qty: r.qty, lastPrice: r.last_price, priceUpdated: r.price_updated }; }
@@ -414,7 +445,8 @@ function decomposeInto(userId, data, now) {
     (Array.isArray(data.tx) ? data.tx : []).forEach(t => {
       if (!t || !t.id) return;
       const assetQty = (() => { const q = toNum(t.assetQty); return q != null && q > 0 ? q : null; })();
-      stmt.insTx.run(String(t.id), userId, t.type === "inc" ? "inc" : "exp", strTrim(t.cat, "Другое"), toAmount(t.amount) || 0, typeof t.note === "string" ? t.note : "", typeof t.date === "string" ? t.date : new Date().toISOString(), strOrNull(t.fixedId), strOrNull(t.refundFor), strOrNull(t.cardId), strOrNull(t.cardRepay), strOrNull(t.piggyId), strOrNull(t.assetId), strOrNull(t.goalId), strOrNull(t.debtRepay), assetQty, now, now);
+      const interestPortion = (() => { const ip = toNum(t.interestPortion); return ip != null && ip > 0 ? ip : null; })();
+      stmt.insTx.run(String(t.id), userId, t.type === "inc" ? "inc" : "exp", strTrim(t.cat, "Другое"), toAmount(t.amount) || 0, typeof t.note === "string" ? t.note : "", typeof t.date === "string" ? t.date : new Date().toISOString(), strOrNull(t.fixedId), strOrNull(t.refundFor), strOrNull(t.cardId), strOrNull(t.cardRepay), strOrNull(t.piggyId), strOrNull(t.assetId), strOrNull(t.goalId), strOrNull(t.debtRepay), assetQty, interestPortion, now, now);
     });
     (Array.isArray(data.goals) ? data.goals : []).forEach(g => {
       if (!g || !g.id) return;
@@ -422,7 +454,17 @@ function decomposeInto(userId, data, now) {
     });
     (Array.isArray(data.debts) ? data.debts : []).forEach(d => {
       if (!d || !d.id) return;
-      stmt.insDebt.run(String(d.id), userId, d.kind === "card" ? "card" : null, strTrim(d.name, "Без названия"), strTrim(d.emoji, d.kind === "card" ? "💳" : "🏦"), toAmount(d.limit), toAmount(d.used), toAmount(d.total), toAmount(d.remaining), toAmount(d.monthly), now, now);
+      const isCard = d.kind === "card";
+      const rate = isCard ? null : (() => { const r = toNum(d.rate); return r != null && r > 0 ? r : null; })();
+      const payDay = isCard ? null : (() => { const p = toNum(d.paymentDay); return p != null && p >= 1 && p <= 31 ? Math.round(p) : null; })();
+      const notifyDays = (() => { const n = toNum(d.notifyDaysBefore); return n != null && n >= 0 ? Math.round(n) : 3; })();
+      stmt.insDebt.run(
+        String(d.id), userId, isCard ? "card" : null, strTrim(d.name, "Без названия"), strTrim(d.emoji, isCard ? "💳" : "🏦"),
+        toAmount(d.limit), toAmount(d.used), toAmount(d.total), toAmount(d.remaining), toAmount(d.monthly),
+        isCard ? null : (LOAN_TYPES.includes(d.loanType) ? d.loanType : null), rate,
+        isCard ? null : (typeof d.startDate === "string" && !isNaN(Date.parse(d.startDate)) ? d.startDate : null),
+        payDay, isCard ? 0 : (d.notifyEmail ? 1 : 0), notifyDays, now, now
+      );
     });
     (Array.isArray(data.fixed) ? data.fixed : []).forEach(f => {
       if (!f || !f.id) return;
@@ -621,8 +663,8 @@ const now = () => Date.now();
 const RESOURCES = {
   transactions: {
     list: (uid) => stmt.listTx.all(uid), get: (uid, id) => stmt.getTx.get(uid, id), toObj: rowToTx, validate: validateTx,
-    create(uid, id, v) { stmt.insTx.run(id, uid, v.type, v.cat, v.amount, v.note, v.date, v.fixedId, v.refundFor, v.cardId, v.cardRepay, v.piggyId, v.assetId, v.goalId, v.debtRepay, v.assetQty, now(), now()); return stmt.getTx.get(uid, id); },
-    update(uid, id, v) { if (!stmt.getTx.get(uid, id)) return null; stmt.updTx.run(v.type, v.cat, v.amount, v.note, v.date, v.fixedId, v.refundFor, v.cardId, v.cardRepay, v.piggyId, v.assetId, v.goalId, v.debtRepay, v.assetQty, now(), uid, id); return stmt.getTx.get(uid, id); },
+    create(uid, id, v) { stmt.insTx.run(id, uid, v.type, v.cat, v.amount, v.note, v.date, v.fixedId, v.refundFor, v.cardId, v.cardRepay, v.piggyId, v.assetId, v.goalId, v.debtRepay, v.assetQty, v.interestPortion, now(), now()); return stmt.getTx.get(uid, id); },
+    update(uid, id, v) { if (!stmt.getTx.get(uid, id)) return null; stmt.updTx.run(v.type, v.cat, v.amount, v.note, v.date, v.fixedId, v.refundFor, v.cardId, v.cardRepay, v.piggyId, v.assetId, v.goalId, v.debtRepay, v.assetQty, v.interestPortion, now(), uid, id); return stmt.getTx.get(uid, id); },
     remove(uid, id) { const existed = !!stmt.getTx.get(uid, id); if (existed) stmt.delTx.run(uid, id); return existed; },
   },
   goals: {
@@ -633,8 +675,8 @@ const RESOURCES = {
   },
   debts: {
     list: (uid) => stmt.listDebts.all(uid), get: (uid, id) => stmt.getDebt.get(uid, id), toObj: rowToDebt, validate: validateDebt,
-    create(uid, id, v) { stmt.insDebt.run(id, uid, v.kind, v.name, v.emoji, v.limit, v.used, v.total, v.remaining, v.monthly, now(), now()); return stmt.getDebt.get(uid, id); },
-    update(uid, id, v) { if (!stmt.getDebt.get(uid, id)) return null; stmt.updDebt.run(v.kind, v.name, v.emoji, v.limit, v.used, v.total, v.remaining, v.monthly, now(), uid, id); return stmt.getDebt.get(uid, id); },
+    create(uid, id, v) { stmt.insDebt.run(id, uid, v.kind, v.name, v.emoji, v.limit, v.used, v.total, v.remaining, v.monthly, v.loanType, v.rate, v.startDate, v.paymentDay, v.notifyEmail ? 1 : 0, v.notifyDaysBefore, now(), now()); return stmt.getDebt.get(uid, id); },
+    update(uid, id, v) { if (!stmt.getDebt.get(uid, id)) return null; stmt.updDebt.run(v.kind, v.name, v.emoji, v.limit, v.used, v.total, v.remaining, v.monthly, v.loanType, v.rate, v.startDate, v.paymentDay, v.notifyEmail ? 1 : 0, v.notifyDaysBefore, now(), uid, id); return stmt.getDebt.get(uid, id); },
     remove(uid, id) { const existed = !!stmt.getDebt.get(uid, id); if (existed) stmt.delDebt.run(uid, id); return existed; },
   },
   "fixed-payments": {
@@ -674,6 +716,7 @@ const server = http.createServer(async (req, res) => {
   // Для Admin: server-to-server по общему ключу (см. admin-internal.js), не SSO.
   if (p === "/internal/stats" && req.method === "GET") {
     if (!checkAdminKey(req)) return errJson(res, 403, "forbidden", "Доступ запрещён");
+    const since7d = now() - 7 * 24 * 60 * 60 * 1000;
     return json(res, 200, {
       ok: true,
       users: db.prepare("SELECT COUNT(*) AS n FROM settings").get().n,
@@ -681,6 +724,10 @@ const server = http.createServer(async (req, res) => {
       goals: db.prepare("SELECT COUNT(*) AS n FROM goals").get().n,
       debts: db.prepare("SELECT COUNT(*) AS n FROM debts").get().n,
       assets: db.prepare("SELECT COUNT(*) AS n FROM assets").get().n,
+      // Активность, а не просто накопленный объём: сколько записей и разных
+      // людей реально пользовались сервисом за последнюю неделю.
+      transactions7d: db.prepare("SELECT COUNT(*) AS n FROM transactions WHERE created_at > ?").get(since7d).n,
+      activeUsers7d: db.prepare("SELECT COUNT(DISTINCT user_id) AS n FROM transactions WHERE created_at > ?").get(since7d).n,
     });
   }
   if (p === "/internal/logs" && req.method === "GET") {
