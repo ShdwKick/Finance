@@ -19,7 +19,10 @@ services:
       AUTH_CLIENT_ID: finance
       # Общий секрет для Admin: доступ к /internal/stats и /internal/logs.
       # То же самое значение — в Auth, Movies, Trip и в самом Admin.
-      ADMIN_INTERNAL_KEY: замените-на-случайную-строку
+      # Берётся из файла .env рядом с этим compose (права 600), сам секрет в
+      # репозиторий не попадает. Сгенерировать: openssl rand -hex 32. Пустым —
+      # /internal/* просто всегда отвечает 403, а не падает — безопасный дефолт.
+      ADMIN_INTERNAL_KEY: ${ADMIN_INTERNAL_KEY:-}
       # Этот сервис должен быть зарегистрирован в auth как клиент:
       #   docker compose exec auth node server.js client-add finance "Мои финансы" https://money.burninghouse.ru/
       # Регистрацией и паролями заведует auth — здесь их настроек больше нет.
