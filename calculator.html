@@ -1,0 +1,271 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Кредитный и ипотечный калькулятор онлайн — расчёт платежей и переплаты | BurningHouse</title>
+<meta name="description" content="Бесплатный калькулятор кредита и ипотеки без регистрации: аннуитетный и дифференцированный график платежей, полная переплата, график погашения по месяцам, расчёт досрочного погашения.">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="canonical" href="https://money.burninghouse.ru/calculator.html">
+<meta name="robots" content="index, follow">
+<meta property="og:type" content="website">
+<meta property="og:title" content="Кредитный и ипотечный калькулятор онлайн">
+<meta property="og:description" content="Аннуитетный и дифференцированный график, переплата, досрочное погашение — бесплатно, без регистрации.">
+<meta property="og:url" content="https://money.burninghouse.ru/calculator.html">
+<meta name="twitter:card" content="summary">
+<link rel="icon" type="image/svg+xml" href="assets/favicon.svg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Roboto+Flex:opsz,wght@8..144,400;8..144,500;8..144,600;8..144,700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/brand.css">
+<link rel="stylesheet" href="assets/styles.css">
+<style>
+  .calc-wrap{max-width:720px;margin:0 auto;padding:0 16px 48px}
+  .calc-wrap h1{font-size:26px;margin:20px 0 6px}
+  .calc-intro{color:var(--md-sys-color-on-surface-variant);font-size:14px;line-height:1.5;margin-bottom:20px}
+  .calc-wrap h2{font-size:18px;margin:32px 0 10px}
+  .calc-article p{color:var(--md-sys-color-on-surface-variant);font-size:14px;line-height:1.6;margin:0 0 12px}
+  .calc-cta{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+  .sched-table{width:100%;border-collapse:collapse;font-size:13px}
+  .sched-table th,.sched-table td{text-align:right;padding:6px 8px;border-bottom:1px solid var(--md-sys-color-outline-variant)}
+  .sched-table th:first-child,.sched-table td:first-child{text-align:left}
+  .sched-scroll{max-height:320px;overflow:auto;margin-top:10px}
+  footer.calc-foot{text-align:center;color:var(--md-sys-color-on-surface-variant);font-size:12px;padding:24px 16px;opacity:.8}
+</style>
+</head>
+<body>
+
+<div class="bh-backdrop bh-backdrop--page bh-backdrop--quiet" aria-hidden="true">
+  <div class="bh-layer"><div class="bh-glow"></div></div>
+  <div class="bh-layer"><div class="bh-haze"></div></div>
+  <div class="bh-layer bh-sparks bh-sparks--settle" data-bh-sparks="5"></div>
+</div>
+
+<div class="appbar" id="appbar">
+  <div class="appbar-inner">
+    <a class="bh-lockup" href="https://burninghouse.ru" aria-label="BurningHouse">
+      <svg class="bh-mark" viewBox="0 0 24 24" aria-hidden="true">
+        <defs>
+          <linearGradient id="bhFlameBar" x1="0" y1="1" x2="0" y2="0">
+            <stop offset="0" stop-color="var(--flame-base, #b45309)"/>
+            <stop offset="1" stop-color="var(--flame-tip, #ffd447)"/>
+          </linearGradient>
+        </defs>
+        <path class="bh-flame" fill="url(#bhFlameBar)" fill-rule="evenodd"
+              d="M12 1.2C13.6 5 16.4 6.6 18.2 9.4C21.4 14.4 18.6 22.4 12 22.4C5.4 22.4 2.6 14.4 5.8 9.4C7.2 7.2 9.2 6 10.2 3.4C10.9 5.6 11.4 6.6 12 7.4C12.4 5.6 12.3 3.4 12 1.2ZM12 9.8 7.4 13.6V19.2H16.6V13.6Z"/>
+      </svg>
+      <span class="bh-name">BurningHouse</span>
+      <span class="bh-sep" aria-hidden="true"></span>
+    </a>
+    <div><h1 style="font-size:15px;margin:0">Кредитный калькулятор</h1></div>
+    <div class="spacer"></div>
+    <a class="btn text" href="index.html">Мои финансы →</a>
+    <button class="icon-btn" id="themeBtn" title="Сменить тему" aria-label="Сменить тему"></button>
+  </div>
+</div>
+
+<div class="calc-wrap">
+  <h1>Кредитный и ипотечный калькулятор</h1>
+  <div class="calc-intro">Считает ежемесячный платёж, полную переплату и график погашения — аннуитетный или дифференцированный. Всё считается прямо в браузере, ничего не отправляется на сервер и не сохраняется.</div>
+
+  <div class="panel">
+    <div class="segmented" id="calcScheduleSeg">
+      <button id="calcSchedAnnuity" class="sel" onclick="setCalcSchedule('annuity')">Аннуитетный</button>
+      <button id="calcSchedDiff" onclick="setCalcSchedule('differentiated')">Дифференцированный</button>
+    </div>
+    <div class="row" style="margin-top:14px">
+      <div class="field"><input id="cSum" type="text" inputmode="decimal" placeholder=" " value="5000000" oninput="calcSanitize(this);runCalc()"><label for="cSum">Сумма кредита, ₽</label></div>
+      <div class="field"><input id="cRate" type="text" inputmode="decimal" placeholder=" " value="12" oninput="calcSanitize(this);runCalc()"><label for="cRate">Ставка, % годовых</label></div>
+    </div>
+    <div class="row">
+      <div class="field"><input id="cYears" type="text" inputmode="decimal" placeholder=" " value="20" oninput="calcSanitize(this);runCalc()"><label for="cYears">Срок, лет</label></div>
+      <div class="field filled">
+        <select id="cType" onchange="runCalc()">
+          <option value="mortgage" selected>Ипотека</option>
+          <option value="consumer">Потребительский</option>
+          <option value="auto">Автокредит</option>
+          <option value="other">Другое</option>
+        </select>
+        <svg class="chev icon sm" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"/></svg>
+        <label>Тип</label>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="sumline"><span id="cPaymentLbl">Ежемесячный платёж</span><span class="sv" id="cPayment">—</span></div>
+    <div class="sumline"><span>Переплата за весь срок</span><span class="sv" id="cOverpay">—</span></div>
+    <div class="sumline"><span>Итого выплат</span><span class="sv" id="cTotalPaid">—</span></div>
+    <div class="sumline"><span>Дата погашения (если начать сегодня)</span><span class="sv" id="cPayoffDate">—</span></div>
+    <svg id="cChart" viewBox="0 0 300 110" style="width:100%;height:110px;margin-top:4px;display:block"></svg>
+  </div>
+
+  <div class="panel" id="cEarlyPanel">
+    <div style="font-size:12px;color:var(--md-sys-color-on-surface-variant);margin-bottom:8px">Досрочное погашение — если внести доп. сумму (для аннуитетного графика)</div>
+    <div class="row">
+      <div class="field"><input id="cExtraAmount" type="text" inputmode="decimal" placeholder=" " oninput="calcSanitize(this)"><label for="cExtraAmount">Сумма, ₽</label></div>
+      <div class="field"><input id="cExtraMonth" type="text" inputmode="numeric" placeholder=" " oninput="this.value=this.value.replace(/\D/g,'').slice(0,3)"><label for="cExtraMonth">Через сколько месяцев</label></div>
+    </div>
+    <div class="segmented" id="cStrategySeg">
+      <button id="cStratTerm" class="sel" onclick="setCalcStrategy('term')">Сократить срок</button>
+      <button id="cStratPayment" onclick="setCalcStrategy('payment')">Уменьшить платёж</button>
+    </div>
+    <button class="btn tonal" style="width:100%;margin-top:12px" onclick="calcEarlyRepayPublic()">Посчитать</button>
+    <div class="sumline" id="cExtraResult" style="display:none;margin-top:12px;flex-direction:column;align-items:stretch;gap:6px"></div>
+  </div>
+
+  <div class="panel">
+    <button class="btn text" style="width:100%" onclick="toggleSchedTable()" id="cSchedToggle">Показать график платежей по месяцам</button>
+    <div class="sched-scroll scroll-thin" id="cSchedScroll" style="display:none">
+      <table class="sched-table">
+        <thead><tr><th>Месяц</th><th>Платёж</th><th>Проценты</th><th>Тело долга</th><th>Остаток</th></tr></thead>
+        <tbody id="cSchedBody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="panel calc-cta">
+    <div style="flex:1;min-width:220px">
+      <div style="font-weight:500;margin-bottom:4px">Уже взяли кредит или ипотеку?</div>
+      <div style="font-size:13px;color:var(--md-sys-color-on-surface-variant)">В приложении «Мои финансы» можно вести реальный кредит рядом с остальным бюджетом: настоящая переплата по внесённым платежам, график, календарь и напоминания о дате платежа.</div>
+    </div>
+    <a class="btn filled" href="index.html">Открыть «Мои финансы»</a>
+  </div>
+
+  <div class="calc-article">
+    <h2>Чем аннуитетный платёж отличается от дифференцированного</h2>
+    <p><b>Аннуитетный</b> — платёж одинаковый весь срок кредита. В начале в нём почти всё — проценты, тело долга гасится медленно; ближе к концу срока — наоборот. Это самый частый вариант в российских банках для ипотеки и потребительских кредитов.</p>
+    <p><b>Дифференцированный</b> — тело долга гасится равными долями каждый месяц, поэтому платёж больше всего в первый месяц и постепенно уменьшается. Суммарная переплата при дифференцированном графике при прочих равных ниже, чем при аннуитете, но нагрузка на бюджет в начале выше.</p>
+    <h2>Как считается переплата</h2>
+    <p>Переплата — это сумма всех процентов за весь срок кредита, то есть разница между итоговой суммой выплат и телом кредита. Калькулятор считает её по полному графику платежей, месяц за месяцем, а не приблизительно.</p>
+    <h2>Как работает досрочное погашение</h2>
+    <p>Если внести дополнительную сумму сверх графика, есть два варианта: банк может <b>сократить оставшийся срок</b>, оставив платёж прежним, либо <b>уменьшить сам платёж</b>, оставив срок как есть. Оба варианта снижают переплату, но по-разному — калькулятор считает оба и сравнивает с исходным графиком без досрочного погашения.</p>
+  </div>
+</div>
+
+<footer class="calc-foot">Калькулятор — часть <a href="https://burninghouse.ru" style="color:inherit">BurningHouse</a>. Расчёт выполняется локально в браузере, данные никуда не отправляются.</footer>
+
+<script src="assets/brand.js"></script>
+<script src="assets/loan-math.js"></script>
+<script>
+"use strict";
+function calcFmt(n){
+  n=Math.round((n+Number.EPSILON)*100)/100;
+  const frac=n%1!==0;
+  return new Intl.NumberFormat("ru-RU",{minimumFractionDigits:frac?2:0,maximumFractionDigits:2}).format(n)+" ₽";
+}
+function calcParseAmount(v){
+  v=String(v==null?"":v).replace(/\s/g,"").replace(",",".");
+  const n=parseFloat(v);
+  return isNaN(n)?NaN:Math.round((n+Number.EPSILON)*100)/100;
+}
+function calcSanitize(el){
+  const v=el.value;
+  let cleaned=v.replace(/[^0-9.,]/g,"");
+  const sep=cleaned.search(/[.,]/);
+  if(sep!==-1)cleaned=cleaned.slice(0,sep+1)+cleaned.slice(sep+1).replace(/[.,]/g,"");
+  if(cleaned!==v){
+    const pos=Math.max(0,(el.selectionStart||cleaned.length)-(v.length-cleaned.length));
+    el.value=cleaned;
+    try{el.setSelectionRange(pos,pos);}catch(e){}
+  }
+}
+
+let calcTheme=localStorage.getItem("finCalcTheme")||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");
+function applyCalcTheme(){
+  document.documentElement.setAttribute("data-theme",calcTheme);
+  document.getElementById("themeBtn").innerHTML=calcTheme==="dark"
+    ?'<svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.2 4.2l1.4 1.4M18.4 18.4l1.4 1.4M1 12h2M21 12h2M4.2 19.8l1.4-1.4M18.4 5.6l1.4-1.4"/></svg>'
+    :'<svg class="icon" viewBox="0 0 24 24"><path d="M21 12.8A9 9 0 1 1 11.2 3 7 7 0 0 0 21 12.8Z"/></svg>';
+}
+document.getElementById("themeBtn").onclick=()=>{calcTheme=calcTheme==="dark"?"light":"dark";localStorage.setItem("finCalcTheme",calcTheme);applyCalcTheme();};
+applyCalcTheme();
+
+let calcSchedule="annuity",calcStrategy="term",lastSched=null;
+function setCalcSchedule(s){
+  calcSchedule=s;
+  document.getElementById("calcSchedAnnuity").classList.toggle("sel",s==="annuity");
+  document.getElementById("calcSchedDiff").classList.toggle("sel",s==="differentiated");
+  document.getElementById("cEarlyPanel").style.display=s==="annuity"?"":"none";
+  document.getElementById("cPaymentLbl").textContent=s==="annuity"?"Ежемесячный платёж":"Платёж (первый → последний)";
+  runCalc();
+}
+function setCalcStrategy(s){
+  calcStrategy=s;
+  document.getElementById("cStratTerm").classList.toggle("sel",s==="term");
+  document.getElementById("cStratPayment").classList.toggle("sel",s==="payment");
+}
+function chartSvg(rows,startBalance){
+  if(!rows.length)return"";
+  const W=300,H=110,pad=4;
+  const max=startBalance||rows[0].balance||1;
+  const step=rows.length>1?(W-2*pad)/(rows.length-1):0;
+  const pts=[{x:pad,y:H-pad-(startBalance/max)*(H-2*pad)},...rows.map((r,i)=>({x:pad+(i+1)*step,y:H-pad-(r.balance/max)*(H-2*pad)}))];
+  const line=pts.map((p,i)=>(i?"L":"M")+p.x.toFixed(1)+" "+p.y.toFixed(1)).join(" ");
+  const area=line+` L ${pts[pts.length-1].x.toFixed(1)} ${H-pad} L ${pad} ${H-pad} Z`;
+  return `<path d="${area}" fill="var(--md-sys-color-primary)" opacity="0.12"/><path d="${line}" fill="none" stroke="var(--md-sys-color-primary)" stroke-width="2"/>`;
+}
+function runCalc(){
+  const principal=calcParseAmount(document.getElementById("cSum").value);
+  const rate=calcParseAmount(document.getElementById("cRate").value);
+  const years=calcParseAmount(document.getElementById("cYears").value);
+  if(!(principal>0)||!(rate>=0)||!(years>0)){
+    document.getElementById("cPayment").textContent="—";document.getElementById("cOverpay").textContent="—";
+    document.getElementById("cTotalPaid").textContent="—";document.getElementById("cPayoffDate").textContent="—";
+    document.getElementById("cChart").innerHTML="";lastSched=null;
+    return;
+  }
+  const months=Math.max(1,Math.round(years*12));
+  let sched;
+  if(calcSchedule==="annuity"){
+    const payment=annuityPayment(principal,loanMonthlyRate(rate),months);
+    sched=buildAnnuitySchedule({principal,annualPct:rate,payment,maxMonths:months+1});
+    document.getElementById("cPayment").textContent=calcFmt(payment)+"/мес";
+  }else{
+    sched=buildDifferentiatedSchedule({principal,annualPct:rate,months});
+    const first=sched.rows[0],last=sched.rows[sched.rows.length-1];
+    document.getElementById("cPayment").textContent=calcFmt(first.payment)+" → "+calcFmt(last.payment);
+  }
+  document.getElementById("cOverpay").textContent=calcFmt(sched.totalInterest);
+  document.getElementById("cTotalPaid").textContent=calcFmt(sched.totalPaid);
+  const payoff=new Date();payoff.setMonth(payoff.getMonth()+sched.rows.length);
+  document.getElementById("cPayoffDate").textContent=payoff.toLocaleDateString("ru-RU",{month:"long",year:"numeric"});
+  document.getElementById("cChart").innerHTML=chartSvg(sched.rows,principal);
+  lastSched={principal,rate,months,sched};
+  renderSchedTable(sched.rows);
+  document.getElementById("cExtraResult").style.display="none";
+}
+function renderSchedTable(rows){
+  document.getElementById("cSchedBody").innerHTML=rows.map(r=>
+    `<tr><td>${r.n}</td><td>${calcFmt(r.payment)}</td><td>${calcFmt(r.interest)}</td><td>${calcFmt(r.principal)}</td><td>${calcFmt(r.balance)}</td></tr>`
+  ).join("");
+}
+function toggleSchedTable(){
+  const box=document.getElementById("cSchedScroll");
+  const show=box.style.display==="none";
+  box.style.display=show?"":"none";
+  document.getElementById("cSchedToggle").textContent=show?"Скрыть график платежей":"Показать график платежей по месяцам";
+}
+function calcEarlyRepayPublic(){
+  if(!lastSched||calcSchedule!=="annuity")return;
+  const amount=calcParseAmount(document.getElementById("cExtraAmount").value);
+  const afterMonth=parseInt(document.getElementById("cExtraMonth").value,10);
+  if(!(amount>0))return alert("Введите сумму доп. платежа");
+  if(!(afterMonth>=1))return alert("Введите через сколько месяцев");
+  const {principal,rate,months}=lastSched;
+  const payment=annuityPayment(principal,loanMonthlyRate(rate),months);
+  const baseline=buildAnnuitySchedule({principal,annualPct:rate,payment,maxMonths:months+1});
+  const withExtra=buildAnnuitySchedule({principal,annualPct:rate,payment,maxMonths:months+1,extraPayments:[{afterMonth,amount,strategy:calcStrategy}]});
+  const interestSaved=Math.max(0,Math.round((baseline.totalInterest-withExtra.totalInterest)*100)/100);
+  const box=document.getElementById("cExtraResult");
+  box.style.display="flex";
+  if(calcStrategy==="term"){
+    const monthsSaved=baseline.months-withExtra.months;
+    box.innerHTML=`<span>Экономия на процентах: <b>${calcFmt(interestSaved)}</b></span><span>Срок сократится на ${monthsSaved} мес.</span>`;
+  }else{
+    const newPayment=withExtra.rows.find(r=>r.n===afterMonth+1);
+    box.innerHTML=`<span>Экономия на процентах: <b>${calcFmt(interestSaved)}</b></span><span>Новый платёж: ${newPayment?calcFmt(newPayment.payment):calcFmt(payment)}/мес</span>`;
+  }
+}
+runCalc();
+</script>
+</body>
+</html>

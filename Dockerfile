@@ -7,6 +7,9 @@ COPY server.js ./
 COPY auth-client.js ./
 COPY admin-internal.js ./
 COPY index.html ./
+COPY calculator.html ./
+COPY robots.txt ./
+COPY sitemap.xml ./
 COPY assets/ ./assets/
 
 # Каталог для данных (пользователи + финансовые записи).

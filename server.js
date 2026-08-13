@@ -50,6 +50,11 @@ const ALLOWED_ORIGIN = process.env.ALLOWED_ORIGIN || "";
 const DB_PATH = path.join(DATA_DIR, "store.db");
 const OLD_JSON_STORE = path.join(DATA_DIR, "store.json"); // самый старый формат — для одноразовой миграции
 const APP_HTML = path.join(__dirname, "index.html");
+// Публичная страница-калькулятор (без авторизации, для индексации) + её SEO-файлы.
+// Отдаются как статика наравне с index.html — сами по себе не ходят в API.
+const CALC_HTML = path.join(__dirname, "calculator.html");
+const ROBOTS_TXT = path.join(__dirname, "robots.txt");
+const SITEMAP_XML = path.join(__dirname, "sitemap.xml");
 
 const AUTH_ISSUER = (process.env.AUTH_ISSUER || "").replace(/\/+$/, "");
 const AUTH_CLIENT_ID = process.env.AUTH_CLIENT_ID || "finance";
@@ -601,14 +606,19 @@ const MIME = {
   ".html": "text/html; charset=utf-8", ".css": "text/css; charset=utf-8",
   ".js": "application/javascript; charset=utf-8", ".json": "application/json; charset=utf-8",
   ".svg": "image/svg+xml", ".png": "image/png", ".jpg": "image/jpeg",
-  ".ico": "image/x-icon", ".woff2": "font/woff2"
+  ".ico": "image/x-icon", ".woff2": "font/woff2",
+  ".txt": "text/plain; charset=utf-8", ".xml": "application/xml; charset=utf-8"
 };
 const ASSETS_DIR = path.join(__dirname, "assets");
-// Отдаём ТОЛЬКО index.html и файлы из assets/. store.db, server.js и т.п. недоступны из вне.
+// calculator.html — публичная, без токена (index.html после логина сама уводит на SSO,
+// а сюда специально должны попадать и поисковые боты, см. robots.txt/sitemap.xml ниже).
+const ROOT_STATIC_PATHS = ["/index.html", "/calculator.html", "/robots.txt", "/sitemap.xml"];
+// Отдаём ТОЛЬКО эти файлы и всё из assets/. store.db, server.js и т.п. недоступны из вне.
 function serveStatic(res, pathname) {
-  if (pathname !== "/index.html" && !pathname.startsWith("/assets/")) return false;
+  if (!ROOT_STATIC_PATHS.includes(pathname) && !pathname.startsWith("/assets/")) return false;
   const file = path.join(__dirname, path.normalize(pathname).replace(/^([\\/])+/, ""));
-  const allowed = file === APP_HTML || file === ASSETS_DIR || file.startsWith(ASSETS_DIR + path.sep);
+  const allowed = file === APP_HTML || file === CALC_HTML || file === ROBOTS_TXT || file === SITEMAP_XML
+    || file === ASSETS_DIR || file.startsWith(ASSETS_DIR + path.sep);
   if (!allowed) return false;
   if (fs.existsSync(file) && fs.statSync(file).isFile()) {
     res.writeHead(200, { "Content-Type": MIME[path.extname(file).toLowerCase()] || "application/octet-stream" });
