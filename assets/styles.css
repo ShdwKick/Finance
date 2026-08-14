@@ -422,6 +422,7 @@
   .dialog .actions{display:flex;gap:8px;justify-content:flex-end;margin-top:22px}
   .dialog.dialog-lg{max-width:560px;max-height:85vh;display:flex;flex-direction:column}
   .full-history-list{flex:1;overflow-y:auto;margin-top:8px;min-height:0}
+  .dd-scroll{flex:1;overflow-y:auto;min-height:0;padding-right:2px}
   /* ниже базового z-index скримов — чтобы диалог редактирования, открытый ИЗ диалога «показать всё», был поверх него */
   #fullHistoryScrim,#fullGoalsScrim,#fullAssetsScrim,#fullFixedScrim{z-index:55}
 

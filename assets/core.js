@@ -150,6 +150,7 @@ function normDebtList(list){
       const rate=normNum(d.rate);d.rate=rate>0?rate:null; // ставка % годовых, null = неизвестна
       d.startDate=dateOk(d.startDate)?d.startDate:null;
       const day=normNum(d.paymentDay);d.paymentDay=day>=1&&day<=31?Math.round(day):null;
+      const term=normNum(d.termMonths);d.termMonths=term>0?Math.round(term):null; // исходный срок в месяцах, справочно + для авторасчёта платежа
     }
     kept.push(d);
   });

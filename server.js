@@ -115,6 +115,7 @@ db.exec(`
     monthly REAL,
     loan_type TEXT,          -- 'mortgage'|'consumer'|'auto'|'installment'|'other'|NULL — ярлык, на расчёты не влияет
     rate REAL,               -- % годовых, NULL = не указана
+    term_months INTEGER,     -- исходный срок в месяцах, справочно + для авторасчёта платежа
     start_date TEXT,
     payment_day INTEGER,     -- 1..31, чисто информационно (день платежа)
     created_at INTEGER NOT NULL,
@@ -199,6 +200,7 @@ try { db.exec("ALTER TABLE debts ADD COLUMN loan_type TEXT"); } catch { /* уж�
 try { db.exec("ALTER TABLE debts ADD COLUMN rate REAL"); } catch { /* уже есть */ }
 try { db.exec("ALTER TABLE debts ADD COLUMN start_date TEXT"); } catch { /* уже есть */ }
 try { db.exec("ALTER TABLE debts ADD COLUMN payment_day INTEGER"); } catch { /* уже есть */ }
+try { db.exec("ALTER TABLE debts ADD COLUMN term_months INTEGER"); } catch { /* уже есть */ }
 try { db.exec("ALTER TABLE settings ADD COLUMN onboarding_done INTEGER NOT NULL DEFAULT 0"); } catch { /* уже есть */ }
 
 // Лог для Admin (см. admin-internal.js) — своя таблица поверх той же базы.
@@ -249,8 +251,8 @@ const stmt = {
 
   listDebts: db.prepare("SELECT * FROM debts WHERE user_id = ? ORDER BY created_at ASC"),
   getDebt: db.prepare("SELECT * FROM debts WHERE user_id = ? AND id = ?"),
-  insDebt: db.prepare("INSERT INTO debts (id,user_id,kind,name,emoji,card_limit,used,total,remaining,monthly,loan_type,rate,start_date,payment_day,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"),
-  updDebt: db.prepare("UPDATE debts SET kind=?,name=?,emoji=?,card_limit=?,used=?,total=?,remaining=?,monthly=?,loan_type=?,rate=?,start_date=?,payment_day=?,updated_at=? WHERE user_id=? AND id=?"),
+  insDebt: db.prepare("INSERT INTO debts (id,user_id,kind,name,emoji,card_limit,used,total,remaining,monthly,loan_type,rate,term_months,start_date,payment_day,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"),
+  updDebt: db.prepare("UPDATE debts SET kind=?,name=?,emoji=?,card_limit=?,used=?,total=?,remaining=?,monthly=?,loan_type=?,rate=?,term_months=?,start_date=?,payment_day=?,updated_at=? WHERE user_id=? AND id=?"),
   delDebt: db.prepare("DELETE FROM debts WHERE user_id = ? AND id = ?"),
   delAllDebts: db.prepare("DELETE FROM debts WHERE user_id = ?"),
 
@@ -339,13 +341,14 @@ function validateDebt(body) {
   const value = {
     kind, name: strTrim(body.name, "Без названия"), emoji: strTrim(body.emoji, kind === "card" ? "💳" : "🏦"),
     limit: null, used: null, total: null, remaining: null, monthly: null,
-    loanType: null, rate: null, startDate: null, paymentDay: null,
+    loanType: null, rate: null, termMonths: null, startDate: null, paymentDay: null,
   };
   if (kind === "card") { value.limit = toAmount(body.limit) || 0; value.used = toAmount(body.used) || 0; }
   else {
     value.total = toAmount(body.total) || 0; value.remaining = toAmount(body.remaining) || 0; value.monthly = toAmount(body.monthly) || 0;
     value.loanType = LOAN_TYPES.includes(body.loanType) ? body.loanType : null;
     const rate = toNum(body.rate); value.rate = rate != null && rate > 0 ? rate : null;
+    const term = toNum(body.termMonths); value.termMonths = term != null && term > 0 ? Math.round(term) : null;
     value.startDate = typeof body.startDate === "string" && !isNaN(Date.parse(body.startDate)) ? body.startDate : null;
     const day = toNum(body.paymentDay); value.paymentDay = day != null && day >= 1 && day <= 31 ? Math.round(day) : null;
   }
@@ -391,7 +394,7 @@ function rowToDebt(r) {
   if (r.kind === "card") return { ...base, kind: "card", limit: r.card_limit, used: r.used };
   return {
     ...base, total: r.total, remaining: r.remaining, monthly: r.monthly,
-    loanType: r.loan_type, rate: r.rate, startDate: r.start_date, paymentDay: r.payment_day,
+    loanType: r.loan_type, rate: r.rate, termMonths: r.term_months, startDate: r.start_date, paymentDay: r.payment_day,
   };
 }
 function rowToFixed(r) { return { id: r.id, name: r.name, amount: r.amount, days: JSON.parse(r.days || "[]"), emoji: r.emoji, category: r.category }; }
@@ -457,11 +460,12 @@ function decomposeInto(userId, data, now) {
       if (!d || !d.id) return;
       const isCard = d.kind === "card";
       const rate = isCard ? null : (() => { const r = toNum(d.rate); return r != null && r > 0 ? r : null; })();
+      const termMonths = isCard ? null : (() => { const t = toNum(d.termMonths); return t != null && t > 0 ? Math.round(t) : null; })();
       const payDay = isCard ? null : (() => { const p = toNum(d.paymentDay); return p != null && p >= 1 && p <= 31 ? Math.round(p) : null; })();
       stmt.insDebt.run(
         String(d.id), userId, isCard ? "card" : null, strTrim(d.name, "Без названия"), strTrim(d.emoji, isCard ? "💳" : "🏦"),
         toAmount(d.limit), toAmount(d.used), toAmount(d.total), toAmount(d.remaining), toAmount(d.monthly),
-        isCard ? null : (LOAN_TYPES.includes(d.loanType) ? d.loanType : null), rate,
+        isCard ? null : (LOAN_TYPES.includes(d.loanType) ? d.loanType : null), rate, termMonths,
         isCard ? null : (typeof d.startDate === "string" && !isNaN(Date.parse(d.startDate)) ? d.startDate : null),
         payDay, now, now
       );
@@ -684,8 +688,8 @@ const RESOURCES = {
   },
   debts: {
     list: (uid) => stmt.listDebts.all(uid), get: (uid, id) => stmt.getDebt.get(uid, id), toObj: rowToDebt, validate: validateDebt,
-    create(uid, id, v) { stmt.insDebt.run(id, uid, v.kind, v.name, v.emoji, v.limit, v.used, v.total, v.remaining, v.monthly, v.loanType, v.rate, v.startDate, v.paymentDay, now(), now()); return stmt.getDebt.get(uid, id); },
-    update(uid, id, v) { if (!stmt.getDebt.get(uid, id)) return null; stmt.updDebt.run(v.kind, v.name, v.emoji, v.limit, v.used, v.total, v.remaining, v.monthly, v.loanType, v.rate, v.startDate, v.paymentDay, now(), uid, id); return stmt.getDebt.get(uid, id); },
+    create(uid, id, v) { stmt.insDebt.run(id, uid, v.kind, v.name, v.emoji, v.limit, v.used, v.total, v.remaining, v.monthly, v.loanType, v.rate, v.termMonths, v.startDate, v.paymentDay, now(), now()); return stmt.getDebt.get(uid, id); },
+    update(uid, id, v) { if (!stmt.getDebt.get(uid, id)) return null; stmt.updDebt.run(v.kind, v.name, v.emoji, v.limit, v.used, v.total, v.remaining, v.monthly, v.loanType, v.rate, v.termMonths, v.startDate, v.paymentDay, now(), uid, id); return stmt.getDebt.get(uid, id); },
     remove(uid, id) { const existed = !!stmt.getDebt.get(uid, id); if (existed) stmt.delDebt.run(uid, id); return existed; },
   },
   "fixed-payments": {

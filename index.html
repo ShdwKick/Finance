@@ -248,6 +248,11 @@
         <div class="panel-head">
           <span class="ph-ic w"><svg class="icon sm" viewBox="0 0 24 24"><path d="M3 21h18"/><path d="M5 21V10l7-5 7 5v11"/><path d="M9 21v-6h6v6"/></svg></span>
           <h2>Долговая нагрузка</h2>
+          <a class="icon-btn" href="calculator.html" target="_blank" rel="noopener" title="Кредитный калькулятор" aria-label="Кредитный калькулятор">
+            <svg class="icon sm" viewBox="0 0 24 24"><rect x="4" y="2" width="16" height="20" rx="2"/><line x1="8" y1="6" x2="16" y2="6"/>
+              <circle cx="8" cy="10" r="1" fill="currentColor" stroke="none"/><circle cx="12" cy="10" r="1" fill="currentColor" stroke="none"/><circle cx="16" cy="10" r="1" fill="currentColor" stroke="none"/>
+              <circle cx="8" cy="14" r="1" fill="currentColor" stroke="none"/><circle cx="12" cy="14" r="1" fill="currentColor" stroke="none"/><circle cx="16" cy="14" r="1" fill="currentColor" stroke="none"/></svg>
+          </a>
           <button class="icon-btn tonal add-btn" onclick="openDebt()" title="Новый долг" aria-label="Новый долг">
             <svg class="icon" viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
           </button>
@@ -451,12 +456,13 @@
       </div>
       <div class="row">
         <div class="field"><input id="dRate" type="text" inputmode="decimal" placeholder=" " oninput="sanitizeAmt(this)"><label for="dRate">Ставка, % годовых</label></div>
-        <div class="field"><input id="dStartDate" type="date" placeholder=" "><label for="dStartDate">Дата начала</label></div>
+        <div class="field"><input id="dTermYears" type="text" inputmode="decimal" placeholder=" " oninput="sanitizeAmt(this)"><label for="dTermYears">Срок, лет</label></div>
       </div>
-      <div class="desc" style="margin-top:-6px">Ставка и дата начала нужны для графика, переплаты и калькулятора досрочного погашения — необязательны.</div>
       <div class="row">
+        <div class="field"><input id="dStartDate" type="date" placeholder=" "><label for="dStartDate">Дата начала</label></div>
         <div class="field"><input id="dPaymentDay" type="text" inputmode="numeric" placeholder=" " oninput="this.value=this.value.replace(/\D/g,'').slice(0,2)"><label for="dPaymentDay">День платежа (1–31)</label></div>
       </div>
+      <div class="desc" style="margin-top:-6px">Ставка, срок и дата начала нужны для графика, переплаты и калькулятора досрочного погашения — необязательны. Если платёж не указан, а ставка и срок есть — посчитаем его сами.</div>
     </div>
     <div id="debtCardFields" style="display:none">
       <div class="row">
@@ -479,17 +485,21 @@
     <h3 id="ddTitle">Подробнее о долге</h3>
     <div class="desc" id="ddDesc"></div>
     <div class="desc" id="ddNoRateHint" style="display:none">Укажите ставку и дату начала в «Изменить», чтобы увидеть график, переплату и калькулятор досрочного погашения.</div>
-    <div id="ddContent" style="display:none">
+    <div id="ddContent" class="dd-scroll scroll-thin" style="display:none">
       <div class="sumline"><span>Реально переплачено процентами</span><span class="sv" id="ddPaidInterest">0 ₽</span></div>
       <div class="sumline"><span>Ещё переплатите по графику</span><span class="sv" id="ddRemainInterest">0 ₽</span></div>
       <div class="sumline"><span>Плановая дата погашения</span><span class="sv" id="ddPayoffDate">—</span></div>
       <svg id="ddChart" viewBox="0 0 300 110" style="width:100%;height:110px;margin:4px 0 14px;display:block"></svg>
-      <div style="font-size:12px;color:var(--md-sys-color-on-surface-variant);margin-bottom:8px">Досрочное погашение — если внести доп. сумму</div>
-      <div class="row">
-        <div class="field"><input id="ddExtraAmount" type="text" inputmode="decimal" placeholder=" " oninput="sanitizeAmt(this)"><label for="ddExtraAmount">Сумма, ₽</label></div>
-        <div class="field"><input id="ddExtraDate" type="date" placeholder=" "><label for="ddExtraDate">Дата</label></div>
+      <div style="font-size:12px;color:var(--md-sys-color-on-surface-variant);margin-bottom:8px">Досрочное погашение</div>
+      <div class="segmented" id="ddExtraModeSeg" style="margin-top:0">
+        <button id="ddModeOnce" class="sel" onclick="setDdExtraMode('once')">Разовый платёж</button>
+        <button id="ddModeRecurring" onclick="setDdExtraMode('recurring')">Каждый месяц</button>
       </div>
-      <div class="segmented" id="ddStrategySeg">
+      <div class="row">
+        <div class="field"><input id="ddExtraAmount" type="text" inputmode="decimal" placeholder=" " oninput="sanitizeAmt(this)"><label for="ddExtraAmount" id="ddExtraAmountLbl">Сумма, ₽</label></div>
+        <div class="field" id="ddExtraDateField"><input id="ddExtraDate" type="date" placeholder=" "><label for="ddExtraDate">Дата</label></div>
+      </div>
+      <div class="segmented" id="ddStrategySeg" style="margin-top:14px">
         <button id="ddStratTerm" class="sel" onclick="setDdStrategy('term')">Сократить срок</button>
         <button id="ddStratPayment" onclick="setDdStrategy('payment')">Уменьшить платёж</button>
       </div>

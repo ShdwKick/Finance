@@ -1053,6 +1053,21 @@ function updatePdn(){
   document.getElementById("pdnHint").textContent=state.monthlyIncome?"Учитывается указанный вами доход.":"Авто из доходов за месяц: "+fmt(p.monthInc)+".";
   renderDynamics();
 }
+/* сколько дней до ближайшего платежа по дню месяца (0=сегодня); если day больше числа
+   дней в месяце (напр. 31 в феврале) — берём последний день месяца, как это делают банки */
+function nextPaymentDays(day){
+  const now=new Date();now.setHours(0,0,0,0);
+  const clamp=(y,m,d)=>new Date(y,m,Math.min(d,new Date(y,m+1,0).getDate()));
+  let due=clamp(now.getFullYear(),now.getMonth(),day);
+  if(due<now)due=clamp(now.getFullYear(),now.getMonth()+1,day);
+  return Math.round((due-now)/(24*3600*1000));
+}
+function nextPaymentTag(day){
+  const days=nextPaymentDays(day);
+  const label=days===0?"платёж сегодня":days===1?"платёж завтра":"платёж через "+days+" "+plural(days,["день","дня","дней"]);
+  const col=days<=1?"var(--md-sys-color-error)":days<=3?"var(--md-warn)":"";
+  return col?`<span style="color:${col}">${label}</span>`:label;
+}
 function renderDebts(){
   const p=computePdn();
   const markerLeft=p.pdn===null?0:Math.min(100,p.pdn);
@@ -1095,10 +1110,11 @@ function renderDebts(){
     const paidPct=d.total>0?Math.min(100,Math.round((d.total-d.remaining)/d.total*100)):0;
     const done=d.remaining<=0;
     const typeTag=d.loanType?" · "+LOAN_TYPE_LABEL[d.loanType]:"";
+    const payTag=!done&&d.paymentDay?" · "+nextPaymentTag(d.paymentDay):"";
     return `<div class="tile ${done?"done":""}">
       <div class="top"><div class="emoji">${d.emoji}</div>
         <div><div class="tname">${esc(d.name)}</div>
-        <div class="tsub">${done?"Погашено! 🎉":"осталось "+fmt(d.remaining)+" · "+fmt(d.monthly||0)+"/мес"}${typeTag}</div></div>
+        <div class="tsub">${done?"Погашено! 🎉":"осталось "+fmt(d.remaining)+" · "+fmt(d.monthly||0)+"/мес"}${typeTag}${payTag}</div></div>
         <div class="pct">${paidPct}%</div></div>
       <div class="linear"><i data-w="${paidPct}"></i></div>
       <div class="acts">
@@ -1137,6 +1153,7 @@ function openDebt(id){
   document.getElementById("dLoanType").innerHTML=LOAN_TYPES.map(t=>`<option value="${t}">${LOAN_TYPE_LABEL[t]}</option>`).join("");
   document.getElementById("dLoanType").value=(d&&d.loanType)||"other";
   document.getElementById("dRate").value=d&&d.rate?d.rate:"";
+  document.getElementById("dTermYears").value=d&&d.termMonths?round2(d.termMonths/12):"";
   document.getElementById("dStartDate").value=d&&d.startDate?dateToInput(d.startDate):"";
   document.getElementById("dPaymentDay").value=d&&d.paymentDay?d.paymentDay:"";
   selEmoji=d?d.emoji:(debtKind==="card"?"💳":"🏦");
@@ -1156,16 +1173,21 @@ function saveDebt(){
   }else{
     const total=parseAmount(document.getElementById("dTotal").value);
     let remaining=parseAmount(document.getElementById("dRemain").value);
-    const monthly=Math.max(0,parseAmount(document.getElementById("dMonthly").value)||0);
+    let monthly=Math.max(0,parseAmount(document.getElementById("dMonthly").value)||0);
     if(!total||total<=0)return snack("Введите общую сумму долга");
     if(isNaN(remaining))remaining=total;
     const rate=parseAmount(document.getElementById("dRate").value);
+    const termYears=parseAmount(document.getElementById("dTermYears").value);
+    const termMonths=termYears>0?Math.round(termYears*12):null;
     const startDateVal=document.getElementById("dStartDate").value;
     const payDay=parseInt(document.getElementById("dPaymentDay").value,10);
+    // платёж не указан, но известны ставка и срок — считаем аннуитетный платёж сами (как в калькуляторе)
+    if(!monthly&&rate>0&&termMonths>0)monthly=round2(annuityPayment(remaining,loanMonthlyRate(rate),termMonths));
     data={
       name,total,remaining:Math.max(0,remaining),monthly,emoji:selEmoji,
       loanType:document.getElementById("dLoanType").value||"other",
       rate:rate>0?rate:null,
+      termMonths:termMonths>0?termMonths:null,
       startDate:startDateVal?dateFromInput(startDateVal):null,
       paymentDay:payDay>=1&&payDay<=31?payDay:null,
     };
@@ -1174,7 +1196,7 @@ function saveDebt(){
     const d=state.debts.find(x=>x.id===editId);
     // при смене типа стираем поля другого типа, чтобы не остались «хвосты»
     delete d.kind;delete d.limit;delete d.used;delete d.total;delete d.remaining;delete d.monthly;
-    delete d.loanType;delete d.rate;delete d.startDate;delete d.paymentDay;
+    delete d.loanType;delete d.rate;delete d.termMonths;delete d.startDate;delete d.paymentDay;
     Object.assign(d,data);
   }else state.debts.push({id:uid(),...data});
   save();closeScrim("debtScrim");render();snack(debtKind==="card"?"Кредитка сохранена":"Долг сохранён");
@@ -1190,6 +1212,7 @@ function openDebtDetail(id){
   const parts=[];
   if(d.loanType)parts.push(LOAN_TYPE_LABEL[d.loanType]);
   if(d.rate)parts.push(d.rate+"% годовых");
+  if(d.termMonths)parts.push("срок "+fmtTermYears(d.termMonths));
   if(d.startDate)parts.push("с "+fmtDateShort(d.startDate));
   if(d.paymentDay)parts.push("платёж "+d.paymentDay+"-го числа");
   document.getElementById("ddDesc").textContent=parts.length?parts.join(" · "):"Тип/ставка/дата не указаны";
@@ -1201,6 +1224,7 @@ function openDebtDetail(id){
   document.getElementById("ddExtraResult").style.display="none";
   document.getElementById("ddExtraAmount").value="";
   document.getElementById("ddExtraDate").value="";
+  setDdExtraMode("once");
   setDdStrategy("term");
   const paidInterest=state.tx.filter(t=>t.debtRepay===id&&t.interestPortion!=null).reduce((s,t)=>s+t.interestPortion,0);
   if(isDone&&paidInterest>0)document.getElementById("ddNoRateHint").textContent+=" Всего переплачено процентами: "+fmt(paidInterest)+".";
@@ -1222,6 +1246,23 @@ function setDdStrategy(s){
   document.getElementById("ddStratTerm").classList.toggle("sel",s==="term");
   document.getElementById("ddStratPayment").classList.toggle("sel",s==="payment");
 }
+let ddExtraMode="once";
+function setDdExtraMode(m){
+  ddExtraMode=m;
+  document.getElementById("ddModeOnce").classList.toggle("sel",m==="once");
+  document.getElementById("ddModeRecurring").classList.toggle("sel",m==="recurring");
+  document.getElementById("ddExtraDateField").style.display=m==="once"?"":"none";
+  document.getElementById("ddStrategySeg").style.display=m==="once"?"":"none";
+  document.getElementById("ddExtraAmountLbl").textContent=m==="once"?"Сумма, ₽":"Доп. сумма в месяц, ₽";
+  document.getElementById("ddExtraResult").style.display="none";
+}
+function fmtTermYears(months){
+  const years=months/12;
+  const wholeYears=Math.floor(years),restMonths=Math.round(months-wholeYears*12);
+  if(restMonths===0)return wholeYears+" "+plural(wholeYears,["год","года","лет"]);
+  if(wholeYears===0)return restMonths+" "+plural(restMonths,["месяц","месяца","месяцев"]);
+  return wholeYears+" "+plural(wholeYears,["год","года","лет"])+" "+restMonths+" мес.";
+}
 function debtBalanceChartSvg(rows,startBalance){
   if(!rows.length)return"";
   const W=300,H=110,pad=4;
@@ -1235,17 +1276,25 @@ function debtBalanceChartSvg(rows,startBalance){
 function calcEarlyRepay(){
   const d=state.debts.find(x=>x.id===ddDebtId);if(!d||!d.rate)return;
   const amount=parseAmount(document.getElementById("ddExtraAmount").value);
+  if(!amount||amount<=0)return snack("Введите сумму");
+  const payment=d.monthly||0;
+  const baseline=buildAnnuitySchedule({principal:d.remaining,annualPct:d.rate,payment});
+  const box=document.getElementById("ddExtraResult");
+  box.style.display="flex";
+  if(ddExtraMode==="recurring"){
+    // постоянная переплата = просто больший ежемесячный платёж с сегодняшнего дня и до конца срока
+    const withExtra=buildAnnuitySchedule({principal:d.remaining,annualPct:d.rate,payment:payment+amount});
+    const interestSaved=Math.max(0,round2(baseline.totalInterest-withExtra.totalInterest));
+    const monthsSaved=baseline.months-withExtra.months;
+    box.innerHTML=`<span>Экономия на процентах: <b>${fmt(interestSaved)}</b></span><span>Платёж ${fmt(payment+amount)}/мес — погасите на ${monthsSaved} мес. раньше</span>`;
+    return;
+  }
   const dateVal=document.getElementById("ddExtraDate").value;
-  if(!amount||amount<=0)return snack("Введите сумму доп. платежа");
   if(!dateVal)return snack("Введите дату");
   const target=dateFromInput(dateVal);
   const months=Math.max(1,Math.round((new Date(target)-new Date())/(30.44*24*3600*1000)));
-  const payment=d.monthly||0;
-  const baseline=buildAnnuitySchedule({principal:d.remaining,annualPct:d.rate,payment});
   const withExtra=buildAnnuitySchedule({principal:d.remaining,annualPct:d.rate,payment,extraPayments:[{afterMonth:months,amount,strategy:ddStrategy}]});
   const interestSaved=Math.max(0,round2(baseline.totalInterest-withExtra.totalInterest));
-  const box=document.getElementById("ddExtraResult");
-  box.style.display="flex";
   if(ddStrategy==="term"){
     const monthsSaved=baseline.months-withExtra.months;
     box.innerHTML=`<span>Экономия на процентах: <b>${fmt(interestSaved)}</b></span><span>Срок сократится на ${monthsSaved} мес.</span>`;
