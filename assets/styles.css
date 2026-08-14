@@ -343,7 +343,7 @@
   .row>*{flex:1;min-width:0}
 
   /* ===================== BUTTONS ===================== */
-  .btn{position:relative;display:inline-flex;align-items:center;justify-content:center;gap:8px;height:48px;padding:0 24px;border:0;border-radius:var(--md-sys-shape-corner-full);font-family:inherit;font-size:15px;font-weight:600;cursor:pointer;overflow:hidden;transition:box-shadow .2s}
+  .btn{position:relative;display:inline-flex;align-items:center;justify-content:center;gap:8px;height:48px;padding:0 24px;border:0;border-radius:var(--md-sys-shape-corner-full);font-family:inherit;font-size:15px;font-weight:600;cursor:pointer;overflow:hidden;transition:box-shadow .2s;text-decoration:none}
   .btn::after{content:"";position:absolute;inset:0;background:currentColor;opacity:0;transition:opacity .2s}
   .btn:hover::after{opacity:.08}.btn:active::after{opacity:.12}
   .btn.filled{background:var(--md-sys-color-primary);color:var(--md-sys-color-on-primary)}

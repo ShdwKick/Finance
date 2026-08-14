@@ -22,13 +22,29 @@
   .calc-wrap h1{font-size:26px;margin:20px 0 6px}
   .calc-intro{color:var(--md-sys-color-on-surface-variant);font-size:14px;line-height:1.5;margin-bottom:20px}
   .calc-wrap h2{font-size:18px;margin:32px 0 10px}
-  .calc-article p{color:var(--md-sys-color-on-surface-variant);font-size:14px;line-height:1.6;margin:0 0 12px}
+  .calc-article p{color:var(--md-sys-color-on-surface-variant);font-size:14px;line-height:1.6;margin:0 0 12px;text-align:justify;text-justify:inter-word}
   .calc-cta{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
   .sched-table{width:100%;border-collapse:collapse;font-size:13px}
   .sched-table th,.sched-table td{text-align:right;padding:6px 8px;border-bottom:1px solid var(--md-sys-color-outline-variant)}
   .sched-table th:first-child,.sched-table td:first-child{text-align:left}
   .sched-scroll{max-height:320px;overflow:auto;margin-top:10px}
   footer.calc-foot{text-align:center;color:var(--md-sys-color-on-surface-variant);font-size:12px;padding:24px 16px;opacity:.8}
+  #infoScrim p,#govDetailScrim p{font-size:14px;color:var(--md-sys-color-on-surface-variant);line-height:1.6;margin:0 0 12px;text-align:justify;text-justify:inter-word}
+  .chart-legend{display:flex;gap:16px;font-size:12px;color:var(--md-sys-color-on-surface-variant);margin-top:14px}
+  .chart-legend span{display:flex;align-items:center;gap:6px}
+  .chart-legend i{width:10px;height:10px;border-radius:50%;display:block}
+  .chart-wrap{position:relative;margin-top:6px}
+  .chart-tip{position:absolute;pointer-events:none;background:var(--md-sys-color-inverse-surface);color:var(--md-sys-color-inverse-on-surface);
+    font-size:12px;line-height:1.5;padding:8px 10px;border-radius:var(--md-sys-shape-corner-s);opacity:0;transition:opacity .12s;
+    transform:translate(-50%,-100%);white-space:nowrap;box-shadow:0 4px 12px rgba(0,0,0,.25);z-index:2}
+  .chart-tip.show{opacity:1}
+  .gov-list{display:flex;flex-direction:column;gap:8px}
+  .gov-item{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:10px 14px;
+    border-radius:var(--md-sys-shape-corner-l);background:var(--md-sys-color-secondary-container);
+    color:var(--md-sys-color-on-secondary-container);border:0;font-family:inherit;text-align:left;cursor:pointer;width:100%}
+  .gov-item:hover{filter:brightness(1.04)}
+  .gov-item b{font-weight:600}
+  .gov-item .gov-rate{font-size:15px;font-weight:600;flex:0 0 auto}
 </style>
 </head>
 <body>
@@ -57,7 +73,7 @@
     </a>
     <div><h1 style="font-size:15px;margin:0">Кредитный калькулятор</h1></div>
     <div class="spacer"></div>
-    <a class="btn text" href="index.html">Мои финансы →</a>
+    <a class="btn tonal" href="index.html">Мои финансы</a>
     <button class="icon-btn" id="themeBtn" title="Сменить тему" aria-label="Сменить тему"></button>
   </div>
 </div>
@@ -67,15 +83,20 @@
   <div class="calc-intro">Считает ежемесячный платёж, полную переплату и график погашения — аннуитетный или дифференцированный. Всё считается прямо в браузере, ничего не отправляется на сервер и не сохраняется.</div>
 
   <div class="panel">
-    <div class="segmented" id="calcScheduleSeg">
-      <button id="calcSchedAnnuity" class="sel" onclick="setCalcSchedule('annuity')">Аннуитетный</button>
-      <button id="calcSchedDiff" onclick="setCalcSchedule('differentiated')">Дифференцированный</button>
+    <div class="row" style="align-items:center;gap:8px">
+      <div class="segmented" id="calcScheduleSeg" style="flex:1;margin-bottom:0">
+        <button id="calcSchedAnnuity" class="sel" onclick="setCalcSchedule('annuity')">Аннуитетный</button>
+        <button id="calcSchedDiff" onclick="setCalcSchedule('differentiated')">Дифференцированный</button>
+      </div>
+      <button class="icon-btn" style="flex:0 0 auto" onclick="openInfo()" title="Чем отличаются графики?" aria-label="Чем отличаются графики?">
+        <svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M9.1 9a3 3 0 1 1 4.4 2.6c-.8.5-1.5 1-1.5 2.4"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+      </button>
     </div>
     <div class="row" style="margin-top:14px">
       <div class="field"><input id="cSum" type="text" inputmode="decimal" placeholder=" " value="5000000" oninput="calcSanitize(this);runCalc()"><label for="cSum">Сумма кредита, ₽</label></div>
       <div class="field"><input id="cRate" type="text" inputmode="decimal" placeholder=" " value="12" oninput="calcSanitize(this);runCalc()"><label for="cRate">Ставка, % годовых</label></div>
     </div>
-    <div class="row">
+    <div class="row" style="margin-top:14px">
       <div class="field"><input id="cYears" type="text" inputmode="decimal" placeholder=" " value="20" oninput="calcSanitize(this);runCalc()"><label for="cYears">Срок, лет</label></div>
       <div class="field filled">
         <select id="cType" onchange="runCalc()">
@@ -90,12 +111,25 @@
     </div>
   </div>
 
+  <div class="panel" id="govProgramsPanel">
+    <div style="font-weight:500;margin-bottom:4px">Льготные ипотечные программы в РФ</div>
+    <div style="font-size:13px;color:var(--md-sys-color-on-surface-variant);margin-bottom:12px">Ориентировочные ставки — реальные условия и доступность зависят от банка и часто меняются, перед решением сверьтесь с банком или Госуслугами. Клик подставляет ставку в калькулятор.</div>
+    <div class="gov-list" id="govList"></div>
+  </div>
+
   <div class="panel">
     <div class="sumline"><span id="cPaymentLbl">Ежемесячный платёж</span><span class="sv" id="cPayment">—</span></div>
     <div class="sumline"><span>Переплата за весь срок</span><span class="sv" id="cOverpay">—</span></div>
     <div class="sumline"><span>Итого выплат</span><span class="sv" id="cTotalPaid">—</span></div>
     <div class="sumline"><span>Дата погашения (если начать сегодня)</span><span class="sv" id="cPayoffDate">—</span></div>
-    <svg id="cChart" viewBox="0 0 300 110" style="width:100%;height:110px;margin-top:4px;display:block"></svg>
+    <div class="chart-legend">
+      <span><i style="background:var(--md-sys-color-primary)"></i>Остаток долга</span>
+      <span><i style="background:var(--md-sys-color-tertiary,#8b5cf6)"></i>Выплачено тела</span>
+    </div>
+    <div class="chart-wrap" id="cChartWrap">
+      <svg id="cChart" viewBox="0 0 300 120" preserveAspectRatio="none" style="width:100%;height:150px;display:block"></svg>
+      <div class="chart-tip" id="cChartTip"></div>
+    </div>
   </div>
 
   <div class="panel" id="cEarlyPanel">
@@ -131,9 +165,6 @@
   </div>
 
   <div class="calc-article">
-    <h2>Чем аннуитетный платёж отличается от дифференцированного</h2>
-    <p><b>Аннуитетный</b> — платёж одинаковый весь срок кредита. В начале в нём почти всё — проценты, тело долга гасится медленно; ближе к концу срока — наоборот. Это самый частый вариант в российских банках для ипотеки и потребительских кредитов.</p>
-    <p><b>Дифференцированный</b> — тело долга гасится равными долями каждый месяц, поэтому платёж больше всего в первый месяц и постепенно уменьшается. Суммарная переплата при дифференцированном графике при прочих равных ниже, чем при аннуитете, но нагрузка на бюджет в начале выше.</p>
     <h2>Как считается переплата</h2>
     <p>Переплата — это сумма всех процентов за весь срок кредита, то есть разница между итоговой суммой выплат и телом кредита. Калькулятор считает её по полному графику платежей, месяц за месяцем, а не приблизительно.</p>
     <h2>Как работает досрочное погашение</h2>
@@ -142,6 +173,31 @@
 </div>
 
 <footer class="calc-foot">Калькулятор — часть <a href="https://burninghouse.ru" style="color:inherit">BurningHouse</a>. Расчёт выполняется локально в браузере, данные никуда не отправляются.</footer>
+
+<!-- ===================== INFO POPUP: аннуитет vs дифференцированный ===================== -->
+<div class="scrim" id="infoScrim">
+  <div class="dialog">
+    <h3>Аннуитетный или дифференцированный?</h3>
+    <p><b>Аннуитетный</b> — платёж одинаковый весь срок кредита. В начале в нём почти всё — проценты, тело долга гасится медленно; ближе к концу срока — наоборот. Это самый частый вариант в российских банках для ипотеки и потребительских кредитов.</p>
+    <p><b>Дифференцированный</b> — тело долга гасится равными долями каждый месяц, поэтому платёж больше всего в первый месяц и постепенно уменьшается. Суммарная переплата при дифференцированном графике при прочих равных ниже, чем при аннуитете, но нагрузка на бюджет в начале выше.</p>
+    <div class="actions">
+      <button class="btn text" onclick="closeInfo()">Понятно</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===================== GOV PROGRAM DETAIL POPUP ===================== -->
+<div class="scrim" id="govDetailScrim">
+  <div class="dialog">
+    <h3 id="govDetailTitle"></h3>
+    <div class="desc" id="govDetailRate"></div>
+    <p id="govDetailDesc"></p>
+    <div class="actions">
+      <button class="btn text" onclick="closeGovDetail()">Закрыть</button>
+      <button class="btn filled" onclick="applyGovRate()">Использовать в калькуляторе</button>
+    </div>
+  </div>
+</div>
 
 <script src="assets/brand.js"></script>
 <script src="assets/loan-math.js"></script>
@@ -179,6 +235,53 @@ function applyCalcTheme(){
 document.getElementById("themeBtn").onclick=()=>{calcTheme=calcTheme==="dark"?"light":"dark";localStorage.setItem("finCalcTheme",calcTheme);applyCalcTheme();};
 applyCalcTheme();
 
+function openInfo(){document.getElementById("infoScrim").classList.add("show");document.body.classList.add("scroll-lock");}
+function closeInfo(){document.getElementById("infoScrim").classList.remove("show");document.body.classList.remove("scroll-lock");}
+document.getElementById("infoScrim").addEventListener("click",e=>{if(e.target.id==="infoScrim")closeInfo();});
+document.addEventListener("keydown",e=>{if(e.key==="Escape")closeInfo();});
+
+/* ставки и условия — ориентировочные, реальные меняются по решениям правительства и
+   зависят от банка/региона; клик открывает подробности, ставка подставляется в форму
+   только по отдельной кнопке внутри — ничего не проверяет и не гарантирует */
+const GOV_PROGRAMS=[
+  {name:"Семейная ипотека",rate:6,desc:"Для семей с детьми (обычно — ребёнок до 6 лет, либо другие льготные категории семей с детьми). Условия и список категорий периодически меняются постановлениями правительства."},
+  {name:"IT-ипотека",rate:6,desc:"Для сотрудников аккредитованных Минцифры IT-компаний. Обычно есть возрастные ограничения и требования к зарплате — по регионам отличаются."},
+  {name:"Дальневосточная и арктическая ипотека",rate:2,desc:"Для покупки жилья в Дальневосточном федеральном округе или Арктической зоне. Часто привязана к возрасту (например, до 35 лет) и другим условиям по региону."},
+  {name:"Сельская ипотека",rate:3,desc:"Для покупки или строительства жилья в сельской местности. Есть ограничения по типу и площади жилья, доступна не во всех населённых пунктах."},
+];
+function renderGovList(){
+  document.getElementById("govList").innerHTML=GOV_PROGRAMS.map((p,i)=>
+    `<button type="button" class="gov-item" onclick="openGovDetail(${i})"><span><b>${p.name}</b></span><span class="gov-rate">от ${p.rate}%</span></button>`
+  ).join("");
+}
+let govDetailIndex=null;
+function openGovDetail(i){
+  govDetailIndex=i;
+  const p=GOV_PROGRAMS[i];
+  document.getElementById("govDetailTitle").textContent=p.name;
+  document.getElementById("govDetailRate").textContent="от "+p.rate+"%";
+  document.getElementById("govDetailDesc").textContent=p.desc;
+  document.getElementById("govDetailScrim").classList.add("show");
+  document.body.classList.add("scroll-lock");
+}
+function closeGovDetail(){
+  document.getElementById("govDetailScrim").classList.remove("show");
+  document.body.classList.remove("scroll-lock");
+}
+function applyGovRate(){
+  if(govDetailIndex==null)return;
+  const p=GOV_PROGRAMS[govDetailIndex];
+  document.getElementById("cRate").value=p.rate;
+  document.getElementById("cType").value="mortgage";
+  calcSanitize(document.getElementById("cRate"));
+  closeGovDetail();
+  runCalc();
+  document.getElementById("cRate").scrollIntoView({block:"center",behavior:"smooth"});
+}
+document.getElementById("govDetailScrim").addEventListener("click",e=>{if(e.target.id==="govDetailScrim")closeGovDetail();});
+document.addEventListener("keydown",e=>{if(e.key==="Escape")closeGovDetail();});
+renderGovList();
+
 let calcSchedule="annuity",calcStrategy="term",lastSched=null;
 function setCalcSchedule(s){
   calcSchedule=s;
@@ -193,24 +296,78 @@ function setCalcStrategy(s){
   document.getElementById("cStratTerm").classList.toggle("sel",s==="term");
   document.getElementById("cStratPayment").classList.toggle("sel",s==="payment");
 }
+/* два ряда: остаток долга (падает) и выплаченное тело (растёт, = startBalance-остаток) —
+   зеркальны друг другу, вместе показывают и размер долга, и сколько уже «тела» погашено */
+let chartPoints=[];
 function chartSvg(rows,startBalance){
+  chartPoints=[];
   if(!rows.length)return"";
-  const W=300,H=110,pad=4;
+  const W=300,H=120,pad=6;
   const max=startBalance||rows[0].balance||1;
-  const step=rows.length>1?(W-2*pad)/(rows.length-1):0;
-  const pts=[{x:pad,y:H-pad-(startBalance/max)*(H-2*pad)},...rows.map((r,i)=>({x:pad+(i+1)*step,y:H-pad-(r.balance/max)*(H-2*pad)}))];
-  const line=pts.map((p,i)=>(i?"L":"M")+p.x.toFixed(1)+" "+p.y.toFixed(1)).join(" ");
-  const area=line+` L ${pts[pts.length-1].x.toFixed(1)} ${H-pad} L ${pad} ${H-pad} Z`;
-  return `<path d="${area}" fill="var(--md-sys-color-primary)" opacity="0.12"/><path d="${line}" fill="none" stroke="var(--md-sys-color-primary)" stroke-width="2"/>`;
+  const balances=[startBalance,...rows.map(r=>r.balance)];
+  const step=balances.length>1?(W-2*pad)/(balances.length-1):0;
+  const toY=v=>H-pad-(v/max)*(H-2*pad);
+  const balPts=balances.map((v,i)=>({x:pad+i*step,y:toY(v)}));
+  const paidPts=balances.map((v,i)=>({x:pad+i*step,y:toY(startBalance-v)}));
+  chartPoints=balances.map((v,i)=>({x:pad+i*step,n:i,balance:v,paid:startBalance-v}));
+  const line=pts=>pts.map((p,i)=>(i?"L":"M")+p.x.toFixed(1)+" "+p.y.toFixed(1)).join(" ");
+  const balLine=line(balPts),paidLine=line(paidPts);
+  const balArea=balLine+` L ${balPts[balPts.length-1].x.toFixed(1)} ${H-pad} L ${pad} ${H-pad} Z`;
+  return `<path d="${balArea}" fill="var(--md-sys-color-primary)" opacity="0.10"/>`+
+    `<path d="${balLine}" fill="none" stroke="var(--md-sys-color-primary)" stroke-width="2"/>`+
+    `<path d="${paidLine}" fill="none" stroke="var(--md-sys-color-tertiary)" stroke-width="2"/>`;
+}
+function initChartHover(){
+  const wrap=document.getElementById("cChartWrap"),svg=document.getElementById("cChart"),tip=document.getElementById("cChartTip");
+  function handle(clientX){
+    if(!chartPoints.length)return;
+    const rect=svg.getBoundingClientRect();
+    const relX=(clientX-rect.left)/rect.width*300;
+    let nearest=chartPoints[0];
+    for(const p of chartPoints)if(Math.abs(p.x-relX)<Math.abs(nearest.x-relX))nearest=p;
+    const d=new Date();d.setMonth(d.getMonth()+nearest.n);
+    const when=nearest.n===0?"Сейчас":d.toLocaleDateString("ru-RU",{month:"short",year:"numeric"});
+    tip.innerHTML=`<b>${when}</b><br>Остаток: ${calcFmt(nearest.balance)}<br>Погашено тела: ${calcFmt(nearest.paid)}`;
+    tip.classList.add("show");
+    // клампим по ширине обёртки, чтобы тултип не вылезал за край экрана у крайних точек графика
+    const half=tip.offsetWidth/2,wrapW=wrap.clientWidth;
+    const px=Math.max(half,Math.min(wrapW-half,nearest.x/300*rect.width));
+    tip.style.left=px+"px";
+    tip.style.top="4px";
+  }
+  wrap.addEventListener("mousemove",e=>handle(e.clientX));
+  wrap.addEventListener("mouseleave",()=>tip.classList.remove("show"));
+  wrap.addEventListener("touchstart",e=>{if(e.touches[0])handle(e.touches[0].clientX);},{passive:true});
+  wrap.addEventListener("touchmove",e=>{if(e.touches[0])handle(e.touches[0].clientX);},{passive:true});
+}
+initChartHover();
+const CALC_STORE_KEY="finCalcInputs";
+function saveCalcInputs(){
+  try{
+    localStorage.setItem(CALC_STORE_KEY,JSON.stringify({
+      sum:document.getElementById("cSum").value,
+      rate:document.getElementById("cRate").value,
+      years:document.getElementById("cYears").value,
+      type:document.getElementById("cType").value,
+      schedule:calcSchedule
+    }));
+  }catch(e){/* localStorage недоступен (приватный режим и т.п.) — просто не сохраняем */}
+}
+function loadCalcInputs(){
+  try{
+    const raw=localStorage.getItem(CALC_STORE_KEY);
+    return raw?JSON.parse(raw):null;
+  }catch(e){return null;}
 }
 function runCalc(){
+  saveCalcInputs();
   const principal=calcParseAmount(document.getElementById("cSum").value);
   const rate=calcParseAmount(document.getElementById("cRate").value);
   const years=calcParseAmount(document.getElementById("cYears").value);
   if(!(principal>0)||!(rate>=0)||!(years>0)){
     document.getElementById("cPayment").textContent="—";document.getElementById("cOverpay").textContent="—";
     document.getElementById("cTotalPaid").textContent="—";document.getElementById("cPayoffDate").textContent="—";
-    document.getElementById("cChart").innerHTML="";lastSched=null;
+    document.getElementById("cChart").innerHTML="";chartPoints=[];lastSched=null;
     return;
   }
   const months=Math.max(1,Math.round(years*12));
@@ -265,7 +422,17 @@ function calcEarlyRepayPublic(){
     box.innerHTML=`<span>Экономия на процентах: <b>${calcFmt(interestSaved)}</b></span><span>Новый платёж: ${newPayment?calcFmt(newPayment.payment):calcFmt(payment)}/мес</span>`;
   }
 }
-runCalc();
+(function(){
+  const saved=loadCalcInputs();
+  if(saved){
+    if(saved.sum)document.getElementById("cSum").value=saved.sum;
+    if(saved.rate)document.getElementById("cRate").value=saved.rate;
+    if(saved.years)document.getElementById("cYears").value=saved.years;
+    if(saved.type)document.getElementById("cType").value=saved.type;
+  }
+  if(saved&&saved.schedule==="differentiated")setCalcSchedule("differentiated");
+  else runCalc();
+})();
 </script>
 </body>
 </html>
