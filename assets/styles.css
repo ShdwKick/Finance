@@ -116,6 +116,10 @@
   .scroll-thin::-webkit-scrollbar-track{background:transparent}
   .scroll-thin::-webkit-scrollbar-thumb{background:var(--md-sys-color-outline-variant);border-radius:var(--md-sys-shape-corner-full)}
   .scroll-thin::-webkit-scrollbar-thumb:hover{background:var(--md-sys-color-outline)}
+  /* когда содержимого меньше, чем помещается (пустой/короткий список) — снимаем overflow-y/
+     overscroll-behavior программно (см. fixEmptyScrollables в app.js), иначе на тач-устройствах
+     свайп по пустому месту "проглатывается" контейнером и страница не скроллится */
+  .scroll-thin.no-overflow{overflow-y:visible!important;overscroll-behavior:auto!important}
   /* Базовый цвет отдан наверх, на html: фирменный фон лежит на z-index:-1 и
      под непрозрачной заливкой body его бы просто не было видно.
      Прежние фиолетовые пятна убраны — теперь их роль играет горящий дом. */
@@ -210,6 +214,9 @@
   .delta.flat{color:var(--md-sys-color-on-surface-variant)}
   .mini-spark{width:150px;height:52px;flex:none;display:block;cursor:crosshair}
   @media(max-width:480px){.mini-spark{width:100px}}
+  /* «Комментарий» + фиксированная 170px «Дата» рядом не помещаются на узких экранах —
+     подпись длинная и переполняет своё поле, наезжая на соседнее. Складываем в столбец. */
+  @media(max-width:420px){.row-note-date{flex-direction:column}.row-note-date .field.filled{width:100%!important}}
   .spark-wrap{position:relative;flex:none}
   .spark-tip{
     position:absolute;pointer-events:none;left:0;top:0;
@@ -422,7 +429,9 @@
   .dialog .actions{display:flex;gap:8px;justify-content:flex-end;margin-top:22px}
   .dialog.dialog-lg{max-width:560px;max-height:85vh;display:flex;flex-direction:column}
   .full-history-list{flex:1;overflow-y:auto;margin-top:8px;min-height:0}
-  .dd-scroll{flex:1;overflow-y:auto;min-height:0;padding-right:2px}
+  /* общая обёртка «прокручиваемая середина» для высоких .dialog-lg (шапка/футер остаются
+     на месте, скроллится только контент между ними) — переиспользуется в нескольких диалогах */
+  .dialog-scroll{flex:1;overflow-y:auto;min-height:0;padding-right:2px}
   /* ниже базового z-index скримов — чтобы диалог редактирования, открытый ИЗ диалога «показать всё», был поверх него */
   #fullHistoryScrim,#fullGoalsScrim,#fullAssetsScrim,#fullFixedScrim{z-index:55}
 

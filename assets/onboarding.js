@@ -17,21 +17,29 @@ const ONBOARDING_STEPS=[
   {title:"Готово!",desc:"Теперь вы знаете, где что искать. Хорошего учёта финансов!",target:null},
 ];
 
-let obIndex=0,obActive=false;
+let obIndex=0,obActive=false,obRenderToken=0;
 
 function maybeStartOnboarding(){
   if(!state.onboardingDone)startOnboarding();
 }
 function startOnboarding(){
   obActive=true;
+  obRenderToken++; // глушит недорисованный кадр от предыдущего запуска (напр. быстрый повторный клик)
+  // защитный сброс — на случай, если предыдущий показ закончился ПОСРЕДИ анимации/позиционирования
+  const card=document.getElementById("onbCard"),spot=document.getElementById("onbSpotlight");
+  card.style.visibility="";card.style.top="";card.style.left="";card.classList.remove("center");
+  spot.style.display="none";
   document.getElementById("onbScrim").classList.add("show");
+  document.body.classList.add("scroll-lock");
   window.addEventListener("resize",repositionOnboarding);
   showObStep(0);
 }
 function endOnboarding(){
   if(!obActive)return;
   obActive=false;
+  obRenderToken++;
   document.getElementById("onbScrim").classList.remove("show");
+  if(!document.querySelector(".scrim.show"))document.body.classList.remove("scroll-lock");
   window.removeEventListener("resize",repositionOnboarding);
   if(!state.onboardingDone){state.onboardingDone=true;save();}
 }
@@ -49,7 +57,8 @@ function showObStep(i){
     return i<ONBOARDING_STEPS.length-1?showObStep(i+1):endOnboarding();
   }
   if(target)target.scrollIntoView({block:"center",behavior:"instant"});
-  requestAnimationFrame(()=>renderObStep(step,target,i));
+  const token=obRenderToken;
+  requestAnimationFrame(()=>{ if(token===obRenderToken)renderObStep(step,target,i); });
 }
 function renderObStep(step,target,i){
   const spot=document.getElementById("onbSpotlight");

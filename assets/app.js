@@ -345,6 +345,8 @@ function setPageTab(tab){
     document.getElementById("tab"+t[0].toUpperCase()+t.slice(1)).classList.toggle("sel",t===tab);
     document.getElementById("tabPanel"+t[0].toUpperCase()+t.slice(1)).style.display=t===tab?"":"none";
   });
+  // на скрытой вкладке scrollHeight/clientHeight были 0 — пересчитать теперь, когда видно
+  fixEmptyScrollables();
 }
 
 /* ---------- render ---------- */
@@ -400,6 +402,17 @@ function render(){
   refreshIfOpen("fullGoalsScrim",openFullGoals);
   refreshIfOpen("fullAssetsScrim",openFullAssets);
   refreshIfOpen("fullFixedScrim",openFullFixed);
+  fixEmptyScrollables();
+}
+/* контейнеры со scroll-thin держат overflow-y:auto постоянно, даже когда внутри пусто/мало
+   контента — на тач-устройствах это «съедает» свайп по всей странице (overscroll-behavior:contain
+   не даёт жесту дотянуться до скролла страницы), хотя скроллить внутри нечего. Снимаем это
+   программно, когда реального переполнения нет — после каждого рендера и смены вкладки
+   (на скрытой вкладке scrollHeight/clientHeight всегда 0, поэтому пересчёт нужен и при показе). */
+function fixEmptyScrollables(){
+  document.querySelectorAll(".scroll-thin").forEach(el=>{
+    el.classList.toggle("no-overflow",el.scrollHeight<=el.clientHeight+1);
+  });
 }
 function refreshIfOpen(scrimId,fn){
   if(document.getElementById(scrimId).classList.contains("show"))fn();
@@ -1839,6 +1852,9 @@ function pickEmoji(e,el){selEmoji=e;fixedEmojiAuto=false;el.parentElement.queryS
 function openScrim(id){
   document.getElementById(id).classList.add("show");
   document.body.classList.add("scroll-lock"); // блокируем скролл страницы позади диалога
+  // пока диалог был закрыт, его .scroll-thin-контейнеры мерились нулевой высотой и
+  // могли получить .no-overflow — пересчитать теперь, когда контент реально виден
+  fixEmptyScrollables();
 }
 function closeScrim(id){
   document.getElementById(id).classList.remove("show");
@@ -1892,12 +1908,7 @@ const BRAND_SUB_DEFAULT="Доходы · расходы · цели · долг�
 function applyDisplayName(){
   document.getElementById("brandSub").textContent=state.displayName||BRAND_SUB_DEFAULT;
 }
-function saveDisplayName(v){
-  state.displayName=String(v||"").trim().slice(0,60);
-  save();applyDisplayName();
-}
 function openProfile(){
-  document.getElementById("pfName").value=state.displayName||"";
   /* Пароль и устройства живут в общем аккаунте — здесь только ссылка туда. */
   const authBlock=document.getElementById("pfAccountBlock");
   authBlock.style.display=(syncCapable&&authed)?"":"none";
