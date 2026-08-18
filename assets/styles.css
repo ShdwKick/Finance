@@ -153,7 +153,7 @@
   /* Плашка с кошельком заменена фирменным локапом; знак сам несёт цвет. */
   .appbar .bh-lockup{font-size:15px}
   .appbar .bh-lockup .bh-mark{width:34px;height:34px}
-  .appbar .bh-lockup:focus-visible{outline:2px solid var(--md-sys-color-primary);outline-offset:4px;border-radius:6px}
+  .appbar .bh-lockup-mark:focus-visible, .appbar .bh-lockup-name:focus-visible{outline:2px solid var(--md-sys-color-primary);outline-offset:4px;border-radius:6px}
   .appbar h1{font-size:22px;font-weight:600;letter-spacing:0}
   .appbar .sub{font-size:12px;color:var(--md-sys-color-on-surface-variant);margin-top:-2px}
   .appbar .spacer{flex:1}
