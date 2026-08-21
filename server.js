@@ -807,6 +807,9 @@ const server = http.createServer(async (req, res) => {
 
   // статика (css/js) и приложение (SPA-стиль fallback)
   if (req.method === "GET") {
+    // Некоторые краулеры/тулы запрашивают /favicon.ico напрямую с корня,
+    // игнорируя <link rel="icon"> в index.html — отдаём тот же файл, что и из assets/.
+    if (p === "/favicon.ico" && serveStatic(res, "/assets/favicon.ico")) return;
     if (p !== "/" && serveStatic(res, p)) return;
     return serveApp(res);
   }

@@ -1,7 +1,4 @@
 User-agent: *
-Allow: /calculator.html
-Disallow: /
-Disallow: /index.html
 Disallow: /api/
 
 Sitemap: https://money.burninghouse.ru/sitemap.xml
